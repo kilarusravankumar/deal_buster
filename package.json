@@ -1,0 +1,24 @@
+{
+  "name": "deal_buster",
+  "module": "index.tsx",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run index.tsx",
+    "dev": "bun --hot index.tsx"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "@types/react": "^19.2.18"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@opentui/core": "^0.5.6",
+    "@opentui/keymap": "^0.5.6",
+    "@opentui/react": "^0.5.6",
+    "axios": "^1.19.0",
+    "react": "^19.2.8"
+  }
+}
