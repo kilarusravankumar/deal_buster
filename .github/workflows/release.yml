@@ -1,0 +1,35 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Build binaries
+        run: |
+          bun build --compile --target=bun-linux-x64 ./src/index.tsx --outfile deal-buster-linux-x64
+          bun build --compile --target=bun-darwin-x64 ./src/index.tsx --outfile deal-buster-macos-x64
+          bun build --compile --target=bun-darwin-arm64 ./src/index.tsx --outfile deal-buster-macos-arm64
+          bun build --compile --target=bun-windows-x64 ./src/index.tsx --outfile deal-buster-windows-x64.exe
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            deal-buster-linux-x64
+            deal-buster-macos-x64
+            deal-buster-macos-arm64
+            deal-buster-windows-x64.exe
+          generate_release_notes: true
