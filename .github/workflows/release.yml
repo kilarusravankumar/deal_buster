@@ -5,6 +5,9 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write
+
 jobs:
   build:
     strategy:
@@ -16,9 +19,6 @@ jobs:
           - os: macos-latest
             target: bun-darwin-arm64
             outfile: deal-buster-macos-arm64
-          - os: macos-13
-            target: bun-darwin-x64
-            outfile: deal-buster-macos-x64
           - os: windows-latest
             target: bun-windows-x64
             outfile: deal-buster-windows-x64.exe
@@ -57,7 +57,6 @@ jobs:
         with:
           files: |
             deal-buster-linux-x64
-            deal-buster-macos-x64
             deal-buster-macos-arm64
             deal-buster-windows-x64.exe
           generate_release_notes: true
