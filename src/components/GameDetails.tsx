@@ -67,7 +67,8 @@ export function GameDetailView({ gameDetails, onBack }: GameDetailViewProps) {
         viewportCulling={true}
         contentOptions={{ flexDirection: "column" }}
       >
-        <text style={{ fg: "#e0af68" }}>{gameDetails.name}</text>
+        {/* <text style={{ fg: "#e0af68" }}>{gameDetails.name}</text> */}
+        <ascii-font text={gameDetails.name} font="tiny" color="#7aa2f7" />
 
         <text style={{ marginTop: 1, fg: "#7aa2f7" }}>Steam page</text>
         <text>

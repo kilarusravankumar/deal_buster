@@ -2,6 +2,8 @@ import type { Game } from "../types/game"
 import ConvertToDate from "../util/dateConv"
 import Thumbnail from "./thumb"
 import { CARD_HEIGHT, CARD_WIDTH, GAP_X, GAP_Y } from "./gridMetrics"
+import { useState, useEffect } from "react"
+import { useRenderer } from "@opentui/react"
 
 interface GameCardProps {
   game: Game,
@@ -10,8 +12,11 @@ interface GameCardProps {
   onSelect?: () => void,
 }
 
+
 export default function GameCard({ game, onGameClickHandler, selected, onSelect }: GameCardProps) {
   const savings = Math.round(Number(game.savings))
+  const renderer = useRenderer()
+  const [shouldDisplayImage, setShouldDisplayImage] = useState(renderer.capabilities?.kitty_graphics)
 
   return (
     <box
@@ -31,8 +36,8 @@ export default function GameCard({ game, onGameClickHandler, selected, onSelect 
         onGameClickHandler(game.steamAppID)
       }}
     >
-      <box>
-        <Thumbnail thumbnail={game.thumb} />
+      <box >
+        {displayThumb(shouldDisplayImage, game)}
       </box>
       <box>
         <text>
@@ -59,4 +64,27 @@ export default function GameCard({ game, onGameClickHandler, selected, onSelect 
       </box>
     </box>
   )
+}
+function getInitials(title: string): string {
+  return title
+    .split(/[\s\-:]+/)
+    .map((word) => word[0])
+    .filter(Boolean)
+    .slice(0, 3)
+    .join("")
+    .toUpperCase();
+}
+function displayThumb(shouldDisplayImage: boolean, game: Game) {
+  if (shouldDisplayImage) {
+    return (
+      <Thumbnail thumbnail={game.thumb} />
+    )
+  }
+  return (
+    <box>
+      <ascii-font text={getInitials(game.title)} font="tiny" color={"#7aa2f7"} />
+      <text><b><u><span fg="#7aa2f7">{game.title}</span></u></b></text>
+    </box>
+  )
+
 }
