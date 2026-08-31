@@ -1,5 +1,5 @@
 import { ConsolePosition, createCliRenderer } from "@opentui/core"
-import { createRoot } from "@opentui/react"
+import { createRoot, useKeyboard } from "@opentui/react"
 import { useEffect, useState } from "react"
 import GameGrid from "./src/components/GameGrid"
 import useDeals from "./src/hooks/useDeals"
@@ -8,6 +8,7 @@ import useSteamGameDetails from "./src/hooks/useSteamGameDetails"
 import { GameDetailView } from "./src/components/GameDetails"
 import { SortBar } from "./src/components/SortBar"
 import type { SortType } from "./src/types/sort"
+import SearchBar from "./src/components/searchBar"
 
 type viewTypes = "grid" | "detail"
 interface AppState {
@@ -27,9 +28,16 @@ function App() {
       pageSize: MAX_PAGE_SIZE,
       onlyAAA: false,
       sortBy: "Price"
-    }
+    },
   })
 
+  const [showSearch, setShowSearch] = useState<boolean>(false)
+  const [search, setSearch] = useState<string>("")
+  useKeyboard((key) => {
+    if (key.name === "/") {
+      setShowSearch(true)
+    }
+  })
 
 
   const onGameClickHandler = (steamAppID: string) => {
@@ -83,6 +91,16 @@ function App() {
       <text><span fg="#FF0000">{err}</span></text>
     </box>
   }
+
+  const onSearchStringChange = (searchInput: string) => {
+    setSearch(searchInput)
+  }
+
+  if (showSearch) {
+    return (<box>
+      <SearchBar searchString="" onSearchString={onSearchStringChange} showToggle={setShowSearch} />
+    </box>)
+  }
   return (
     <box>
       <GameGrid
@@ -123,6 +141,7 @@ renderer.keyInput.on("keypress", (key) => {
       renderer.console.show()
     }
   }
+
 })
 
 
