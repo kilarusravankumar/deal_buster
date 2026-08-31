@@ -8,19 +8,17 @@ interface searchBarProps {
 }
 
 export default function SearchBar({ searchString, onSearchString, showToggle }: searchBarProps) {
-  const [search, setSearch] = useState("")
+  const [search, setSearch] = useState(searchString)
 
   const handleSubmit = () => {
     console.log("submitting -->", search)
     onSearchString(search)
   }
 
+  // "q" would be swallowed out of any title being typed, so escape is the
+  // only way out of the bar.
   useKeyboard(key => {
-
-    switch (key.name) {
-      case "q":
-        showToggle(false)
-    }
+    if (key.name === "escape") showToggle(false)
   })
 
 

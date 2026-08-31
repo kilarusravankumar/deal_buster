@@ -12,3 +12,7 @@ export const ROW_STRIDE = CARD_HEIGHT + GAP_Y
 export function columnsFor(viewportWidth: number): number {
   return Math.max(1, Math.floor(viewportWidth / COL_STRIDE))
 }
+
+// Search results carry far less data than a deal, so their cards are shorter.
+export const SEARCH_CARD_HEIGHT = 10
+export const SEARCH_ROW_STRIDE = SEARCH_CARD_HEIGHT + GAP_Y

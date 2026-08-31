@@ -9,6 +9,7 @@ import { GameDetailView } from "./src/components/GameDetails"
 import { SortBar } from "./src/components/SortBar"
 import type { SortType } from "./src/types/sort"
 import SearchBar from "./src/components/searchBar"
+import SearchResults from "./src/components/SearchResults"
 
 type viewTypes = "grid" | "detail"
 interface AppState {
@@ -40,7 +41,8 @@ function App() {
   })
 
 
-  const onGameClickHandler = (steamAppID: string) => {
+  const onGameClickHandler = (steamAppID: string | null) => {
+    // Search results can have no Steam entry at all, so there are no details.
     if (steamAppID && steamAppID.length > 1) {
       setAppState({ ...appState, steamAppID, view: "detail" })
     }
@@ -63,7 +65,10 @@ function App() {
     }))
   }
 
-  const { games, loading: dealsLoading, err, page, totalPages, hasMore, loadMore } = useDeals(appState.params)
+  const {
+    games, loading: dealsLoading, err, page, totalPages, hasMore, loadMore,
+    results, searchLoading, searchErr,
+  } = useDeals(appState.params, search)
   const { gameDetails, loading: detailsLoading } = useSteamGameDetails(appState.steamAppID)
 
   if (appState.view === "detail") {
@@ -76,6 +81,38 @@ function App() {
     }
     return (
       <GameDetailView gameDetails={gameDetails} onBack={onBackHandler} />
+    )
+  }
+
+  const onSearchStringChange = (searchInput: string) => {
+    setSearch(searchInput)
+    setShowSearch(false)
+  }
+
+  const onClearSearch = () => {
+    setSearch("")
+  }
+
+  if (showSearch) {
+    return (<box>
+      <SearchBar searchString={search} onSearchString={onSearchStringChange} showToggle={setShowSearch} />
+    </box>)
+  }
+
+  // A live query replaces the deal grid entirely — the games endpoint returns a
+  // different shape, so it gets its own view.
+  if (search.trim().length > 0) {
+    return (
+      <box>
+        <SearchResults
+          results={results}
+          search={search.trim()}
+          onGameClickHandler={onGameClickHandler}
+          loading={searchLoading}
+          err={searchErr}
+          onClear={onClearSearch}
+        />
+      </box>
     )
   }
 
@@ -92,15 +129,6 @@ function App() {
     </box>
   }
 
-  const onSearchStringChange = (searchInput: string) => {
-    setSearch(searchInput)
-  }
-
-  if (showSearch) {
-    return (<box>
-      <SearchBar searchString="" onSearchString={onSearchStringChange} showToggle={setShowSearch} />
-    </box>)
-  }
   return (
     <box>
       <GameGrid
