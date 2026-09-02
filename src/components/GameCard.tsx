@@ -61,6 +61,9 @@ export default function GameCard({ game, onGameClickHandler, selected, onSelect 
             ? ` (${game.steamRatingPercent}%)`
             : ""}
         </text>
+        <text>
+          <span fg="#6B7280">Press enter⏎ to view more details</span>
+        </text>
       </box>
     </box>
   )

@@ -11,9 +11,14 @@ interface sortBarProps {
 export function SortBar({ current, onChange, page, totalPages }: sortBarProps) {
   useKeyboard((key) => {
     if (key.name === "tab") {
-      let currentIndex = SORT_OPTIONS.indexOf(current)
-      const next = SORT_OPTIONS[(currentIndex + 1) % SORT_OPTIONS.length]
-      if (next) onChange(next)
+      const currentIndex = SORT_OPTIONS.indexOf(current)
+      if (key.shift) {
+        const prev = SORT_OPTIONS[(currentIndex - 1 + SORT_OPTIONS.length) % SORT_OPTIONS.length]
+        if (prev) onChange(prev)
+      } else {
+        const next = SORT_OPTIONS[(currentIndex + 1) % SORT_OPTIONS.length]
+        if (next) onChange(next)
+      }
     }
   })
   return (
@@ -37,6 +42,10 @@ export function SortBar({ current, onChange, page, totalPages }: sortBarProps) {
           }
         </text>
       ))}
+
+      <text>
+        <span fg="#6B7280">{`‹tab› ‹⇧tab›`}</span>
+      </text>
 
       {/* Pushes the page counter to the right edge of the bar. */}
       <box style={{ flexGrow: 1 }} />
