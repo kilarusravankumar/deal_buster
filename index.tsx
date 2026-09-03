@@ -7,6 +7,7 @@ import { MAX_PAGE_SIZE, type DealFilters } from "./src/types/params"
 import useSteamGameDetails from "./src/hooks/useSteamGameDetails"
 import { GameDetailView } from "./src/components/GameDetails"
 import { SortBar } from "./src/components/SortBar"
+import { HelpBar } from "./src/components/HelpBar"
 import type { SortType } from "./src/types/sort"
 import SearchBar from "./src/components/searchBar"
 import SearchResults from "./src/components/SearchResults"
@@ -147,6 +148,7 @@ function App() {
         page={page}
         totalPages={totalPages}
       />
+      <HelpBar />
     </box>
 
   )

@@ -26,7 +26,7 @@ export default function SearchBar({ searchString, onSearchString, showToggle }: 
     <box border >
       <input id="search-input"
         width={30}
-        placeholder="Type here ....."
+        placeholder="Search by Game name ..."
         backgroundColor="#1a1a1a"
         focusedBackgroundColor="#2a2a2a"
         textColor={"#FFFFFF"}
