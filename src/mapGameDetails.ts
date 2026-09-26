@@ -1,7 +1,9 @@
 import type { SteamAppDetailsResponse, GameDetails } from "./types/steamGame";
 
 export default function mapToGameDetails(response: SteamAppDetailsResponse, appId: number): GameDetails | null {
-  const entry = response[appId];
+  const responseID = Object.keys(response)[0]
+
+  const entry = response[responseID]
 
   if (!entry?.success || !entry.data) {
     return null;

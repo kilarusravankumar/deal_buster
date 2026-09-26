@@ -11,7 +11,6 @@ export default function SearchBar({ searchString, onSearchString, showToggle }: 
   const [search, setSearch] = useState(searchString)
 
   const handleSubmit = () => {
-    console.log("submitting -->", search)
     onSearchString(search)
   }
 
