@@ -20,6 +20,7 @@ export default function useSteamGameDetails(steamAppID: string) {
       try {
         let _details = await getGameDetails(steamAppID)
         if (!cancelled) {
+          console.log(_details)
           setGameDetails(_details)
         }
       } catch (err) {
