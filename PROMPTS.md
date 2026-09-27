@@ -943,3 +943,5 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > <status>completed</status>
 > <summary>Background command "Run full headless TUI regression" completed (exit code 0)</summary>
 > </task-notification>
+
+*Outcome:* added src/util/agentTarget.ts resolving the endpoint from argv/env with the deployed Worker as the baked-in default (--agent-url > --local > DEAL_BUSTER_AGENT_URL > legacy AGENT_HOST > prod), passed the ws/wss protocol explicitly instead of relying on PartySocket's private-address guess, and showed the endpoint in the pane title — which surfaced that OpenTUI drops an over-long title entirely, so the tag is now "local" and gives way when the pane is narrow. Verified the compiled binary connects to prod with zero config and honours --local; chatPane.manual.ts still passes all ten steps.
