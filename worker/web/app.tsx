@@ -303,6 +303,15 @@ function Chat() {
               timeout: 0
             });
           }
+          // Pushed by the scheduled price check when a watched game drops.
+          if (data.type === "price-alert") {
+            const count = Array.isArray(data.drops) ? data.drops.length : 0;
+            toasts.add({
+              title: count === 1 ? "💰 A watched game dropped" : `💰 ${count} watched games dropped`,
+              description: data.summary,
+              timeout: 0
+            });
+          }
         } catch {
           // Not JSON or not our event
         }

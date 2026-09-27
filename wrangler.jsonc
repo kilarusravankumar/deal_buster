@@ -10,6 +10,21 @@
     "not_found_handling": "single-page-application",
     "run_worker_first": ["/agents/*", "/oauth/*"]
   },
+  // The workflow shares this Worker's bindings, so it gets AI, DealScout and the
+  // Resend secrets without any extra wiring.
+  "workflows": [
+    {
+      "binding": "PRICE_CHECK_WORKFLOW",
+      "name": "price-check",
+      "class_name": "PriceCheckWorkflow"
+    }
+  ],
+  // Non-secret defaults only. RESEND_API_KEY, NOTIFY_EMAIL and DEV_TRIGGER_TOKEN
+  // come from .dev.vars locally and `wrangler secret put` in production — never
+  // from this file.
+  "vars": {
+    "RESEND_FROM": "onboarding@resend.dev"
+  },
   "durable_objects": {
     "bindings": [
       {

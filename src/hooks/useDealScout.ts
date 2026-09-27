@@ -13,6 +13,9 @@ const AGENT = "deal-scout"
 const CHAT_REQUEST = "cf_agent_use_chat_request"
 const CHAT_RESPONSE = "cf_agent_use_chat_response"
 const CHAT_CLEAR = "cf_agent_chat_clear"
+// Not part of the chat protocol: DealScout.claimPriceAlerts broadcasts this when
+// the scheduled price check finds a watched game has dropped.
+const PRICE_ALERT = "price-alert"
 
 // A turn the agent never terminates would leave the input locked ("still waiting
 // on the last reply…") for the rest of the session, so one is given up on. The
@@ -207,6 +210,19 @@ export default function useDealScout(): DealScoutChat {
         dlog("ws", "unparseable frame:", truncate(raw, 200))
         return
       }
+      if (frame?.type === PRICE_ALERT) {
+        // An unprompted push, not a reply to anything, so it is appended as a
+        // local message: those are excluded from the history sent to the model,
+        // which is right — an alert is not a conversation turn the model took.
+        const drops: unknown[] = Array.isArray(frame.drops) ? frame.drops : []
+        dlog("ws", `price alert with ${drops.length} drop(s)`)
+        const summary =
+          typeof frame.summary === "string" && frame.summary.trim().length > 0
+            ? frame.summary.trim()
+            : "A game on your watchlist dropped in price."
+        mutate((prev) => [...prev, localMessage(`💰 ${summary}`)])
+        return
+      }
       if (frame?.type !== CHAT_RESPONSE) {
         // Not ours, but worth seeing: cf_agent_state, mcp updates, the
         // scheduled-task broadcast. If ONLY these arrive, the request never ran.
@@ -258,7 +274,7 @@ export default function useDealScout(): DealScoutChat {
         })
       }
     },
-    [applyPart, endTurn, failTurn, patch]
+    [applyPart, endTurn, failTurn, mutate, patch]
   )
 
   useEffect(() => {

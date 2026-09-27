@@ -1,5 +1,5 @@
 import { createWorkersAI } from "workers-ai-provider";
-import { callable, routeAgentRequest, type Schedule } from "agents";
+import { callable, getAgentByName, routeAgentRequest, type Schedule } from "agents";
 import { getSchedulePrompt, scheduleSchema } from "agents/schedule";
 import { AIChatAgent, type OnChatMessageOptions } from "@cloudflare/ai-chat";
 import {
@@ -24,6 +24,8 @@ import {
   type Watch,
   type WatchStore
 } from "./state";
+import type { ClaimedAlerts, PriceCheckParams } from "./priceCheckWorkflow";
+import type { PriceDrop } from "./priceCheck";
 import { addWatchTool } from "./tools/addWatch";
 import { getGameDetailsTool } from "./tools/getGameDetails";
 import { listWatchesTool } from "./tools/listWatches";
@@ -33,6 +35,22 @@ import { searchDealsTool } from "./tools/searchDeals";
 
 // Workers AI model for the chat + tool-calling loop.
 const MODEL = "@cf/meta/llama-3.3-70b-instruct-fp8-fast";
+
+// Single-owner app: one shared agent instance, no per-user identity. The TUI and
+// the web chat both connect to this name, and the dev trigger route below has to
+// agree with them.
+//
+// NOT exported: every named export of the Worker's main module is treated by the
+// runtime as an entrypoint, and a string is not one ("Incorrect type for map
+// entry 'AGENT_NAME': the provided value is not of type 'function or
+// ExportedHandler'"). Only the handler and the DealScout/PriceCheckWorkflow
+// classes may be exported from here.
+const AGENT_NAME = "deal-scout";
+
+// 09:00 UTC daily. A cron `schedule()` is idempotent by default, so re-running
+// this on every DO restart returns the existing row instead of stacking up
+// duplicates.
+const PRICE_CHECK_CRON = "0 9 * * *";
 
 export class DealScout extends AIChatAgent<Env, DealScoutState> {
   initialState = initialDealScoutState;
@@ -46,6 +64,7 @@ export class DealScout extends AIChatAgent<Env, DealScoutState> {
   onStart() {
     this.migrateState();
     this.dropStaleGameTags();
+    void this.ensurePriceCheckSchedule();
 
     // Configure OAuth popup behavior for MCP servers that require authentication
     this.mcp.configureOAuthCallback({
@@ -444,6 +463,120 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
     return createUIMessageStreamResponse({ stream });
   }
 
+  /**
+   * Register the daily price check.
+   *
+   * This is a persisted Durable Object alarm, not a timer in a running process:
+   * Cloudflare stores it, and wakes this object to call `runPriceCheck` when it
+   * comes due even if the agent has been idle and nobody is connected.
+   */
+  private async ensurePriceCheckSchedule() {
+    try {
+      await this.schedule(PRICE_CHECK_CRON, "runPriceCheck");
+    } catch (error) {
+      // A failed schedule must not take the agent down — chat still works, the
+      // price check just will not fire until the next start.
+      console.error(
+        "[DealScout] could not register the price-check schedule:",
+        error instanceof Error ? error.message : error
+      );
+    }
+  }
+
+  /**
+   * Start a price-check run. The alarm's callback, and what the dev trigger route
+   * calls.
+   *
+   * The watchlist is passed to the workflow as params rather than being read back
+   * out of this object mid-run, so one run describes one fixed set of watches.
+   */
+  async runPriceCheck(): Promise<{ started: boolean; instanceId?: string; reason?: string }> {
+    const watches = this.state.watches ?? [];
+    if (watches.length === 0) {
+      console.log("[DealScout] price check skipped: nothing is being watched");
+      return { started: false, reason: "nothing watched" };
+    }
+    // The user's global off switch, checked here rather than inside the workflow
+    // so a disabled run costs nothing at all.
+    if (this.state.prefs?.alertsEnabled === false) {
+      console.log("[DealScout] price check skipped: alerts are disabled");
+      return { started: false, reason: "alerts disabled" };
+    }
+
+    const params: PriceCheckParams = { agentName: this.name, watches };
+    const instance = await this.env.PRICE_CHECK_WORKFLOW.create({ params });
+    console.log(
+      `[DealScout] price check started (instance ${instance.id}) for ${watches.length} watch(es)`
+    );
+    return { started: true, instanceId: instance.id };
+  }
+
+  /** Manual trigger for the dev route — same path as the alarm. */
+  @callable()
+  async checkPricesNow() {
+    return await this.runPriceCheck();
+  }
+
+  /**
+   * Claim price alerts: the workflow's only write path into this agent.
+   *
+   * Claiming and recording are one operation on purpose. The workflow sends the
+   * email only for what this returns, so a retried notify step finds the drops
+   * already recorded, claims nothing, and sends nothing — the dedupe that stops a
+   * duplicate email lives here, in the object that owns the state.
+   *
+   * Re-checks each drop against current state rather than trusting the workflow's
+   * view, which was computed before the fetch and could be stale if the watch was
+   * removed, re-targeted, or alerted by a concurrent run in the meantime.
+   */
+  async claimPriceAlerts(
+    drops: PriceDrop[],
+    summary: string,
+    checkedAt: string
+  ): Promise<ClaimedAlerts> {
+    const watches = this.state.watches ?? [];
+    const claimed: PriceDrop[] = [];
+
+    const next = watches.map((watch) => {
+      const drop = drops.find((candidate) => candidate.gameID === watch.gameID);
+      if (drop == null) return watch;
+      // The same two conditions qualifyDrops applied, re-asserted against the
+      // state as it is right now.
+      if (drop.salePrice > watch.targetPrice) return watch;
+      if (watch.lastNotifiedPrice != null && drop.salePrice >= watch.lastNotifiedPrice) {
+        return watch;
+      }
+      claimed.push(drop);
+      return { ...watch, lastNotifiedPrice: drop.salePrice };
+    });
+
+    this.setState({ ...this.state, watches: next, lastPriceCheckAt: checkedAt });
+
+    if (claimed.length > 0) {
+      // broadcast(), not saveMessages(): an alert is not a conversation turn, and
+      // injecting it into chat history would feed it back to the model as new
+      // context on the next message.
+      this.broadcast(
+        JSON.stringify({
+          type: "price-alert",
+          summary,
+          drops: claimed,
+          timestamp: checkedAt
+        })
+      );
+    }
+
+    console.log(
+      `[DealScout] claimed ${claimed.length}/${drops.length} price alert(s)`
+    );
+    return { claimed, alreadyNotified: drops.length - claimed.length };
+  }
+
+  /** A run that found nothing still counts as a check. */
+  async recordPriceCheck(checkedAt: string) {
+    this.setState({ ...this.state, lastPriceCheckAt: checkedAt });
+  }
+
   async executeTask(description: string, _task: Schedule<string>) {
     // Do the actual work here (send email, call API, etc.)
     console.log(`Executing scheduled task: ${description}`);
@@ -462,11 +595,50 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
   }
 }
 
+const json = (body: unknown, status = 200) =>
+  new Response(JSON.stringify(body, null, 2), {
+    status,
+    headers: { "content-type": "application/json" }
+  });
+
+/**
+ * Side door for demos: start a price check right now instead of waiting for the
+ * daily alarm.
+ *
+ * Off unless `DEV_TRIGGER_TOKEN` is set, and then it must be presented — a route
+ * that kicks off real emails should not be reachable just because it was left in
+ * the bundle. Not a substitute for auth; this app has a single owner and no user
+ * identity.
+ */
+async function handleDevPriceCheck(request: Request, env: Env): Promise<Response> {
+  const expected = env.DEV_TRIGGER_TOKEN;
+  if (!expected) return new Response("Not found", { status: 404 });
+  if (request.method !== "POST") {
+    return json({ error: "POST only" }, 405);
+  }
+
+  const provided =
+    request.headers.get("x-dev-token") ??
+    new URL(request.url).searchParams.get("token");
+  if (provided !== expected) {
+    return json({ error: "bad or missing dev token" }, 403);
+  }
+
+  const agent = await getAgentByName<Env, DealScout>(env.DealScout, AGENT_NAME);
+  const result = await agent.runPriceCheck();
+  return json({ agent: AGENT_NAME, ...result });
+}
+
 export default {
   async fetch(request: Request, env: Env) {
+    if (new URL(request.url).pathname === "/dev/price-check") {
+      return await handleDevPriceCheck(request, env);
+    }
     return (
       (await routeAgentRequest(request, env)) ||
       new Response("Not found", { status: 404 })
     );
   }
 } satisfies ExportedHandler<Env>;
+
+export { PriceCheckWorkflow } from "./priceCheckWorkflow";

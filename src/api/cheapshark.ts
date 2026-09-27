@@ -19,16 +19,22 @@ const USER_AGENT = "deal_busters/0.1";
 // ../types/params as MAX_PAGE_SIZE, which the TUI already uses.
 export const MAX_SEARCH_LIMIT = 60;
 
+/**
+ * `tolerate` lists statuses the caller wants handed back instead of thrown on.
+ * Everything else non-2xx throws: a caller that cannot tell a transport failure
+ * from a legitimately empty answer has no way to react correctly.
+ */
 async function request(
   path: string,
   params: Record<string, string>,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  tolerate: number[] = []
 ): Promise<Response> {
   const response = await fetch(`${BASE_URL}${path}?${new URLSearchParams(params)}`, {
     headers: { "User-Agent": USER_AGENT },
     signal
   });
-  if (!response.ok) {
+  if (!response.ok && !tolerate.includes(response.status)) {
     throw new Error(
       `CheapShark ${path} failed: ${response.status} ${response.statusText}`
     );
@@ -282,4 +288,78 @@ export async function searchDeals(input: SearchDealsInput): Promise<Deal[]> {
     metacriticScore: positiveNumber(deal.metacriticScore),
     thumb: deal.thumb
   }));
+}
+
+/** The current Steam price for one watched game. */
+export interface CurrentPrice {
+  gameID: string;
+  title: string;
+  steamAppID: string | null;
+  salePrice: number;
+  normalPrice: number;
+  savingsPercent: number;
+  /** Identifies this price row; changes whenever the price does. */
+  dealID: string;
+}
+
+/** `/games?id=` — one entry per store carrying that store's current price. */
+interface GameLookup {
+  info?: { title?: string; steamAppID?: string | null; thumb?: string | null };
+  deals?: {
+    storeID?: string;
+    dealID?: string;
+    price?: string;
+    retailPrice?: string;
+    savings?: string;
+  }[];
+}
+
+/**
+ * The current Steam price for a single game, by CheapShark `gameID`.
+ *
+ * This is the lookup the price-check workflow runs per watch. `gameID` is the
+ * right key: it is what a watch is stored under and it is stable, whereas a
+ * `dealID` identifies one store+price row and is replaced the moment the price
+ * moves — the very event we are looking for.
+ *
+ * Returns `null`, rather than throwing, for the two "no Steam price" cases, so a
+ * caller can tell them apart from a transport failure:
+ *  - CheapShark answers 404 with `[]` for a gameID it no longer indexes;
+ *  - the game is indexed but has no Steam row (delisted there, or never on it).
+ *
+ * Steam-only, like every other call in this module: the store is filtered to
+ * {@link STEAM_STORE_ID} and no caller gets to widen it.
+ */
+export async function getCurrentPrice(
+  gameID: string,
+  signal?: AbortSignal
+): Promise<CurrentPrice | null> {
+  const response = await request("/games", { id: gameID }, signal, [404]);
+  if (response.status === 404) return null;
+
+  const lookup = (await response.json()) as GameLookup | unknown[];
+  // The 404 body is `[]`, and a malformed 200 must not throw a TypeError here.
+  if (Array.isArray(lookup) || lookup == null) return null;
+
+  const steam = lookup.deals?.find((deal) => deal.storeID === STEAM_STORE_ID);
+  if (steam?.dealID == null || steam.price == null) return null;
+
+  const salePrice = Number(steam.price);
+  const normalPrice = Number(steam.retailPrice);
+  // A non-numeric price would compare false against every target and silently
+  // suppress the alert, so it is treated as no price at all.
+  if (!Number.isFinite(salePrice)) return null;
+
+  const info = lookup.info ?? {};
+  return {
+    gameID,
+    title: info.title ?? "",
+    // Same precedence as steamAppIDCandidates: the thumb path beats the field,
+    // which is sometimes stale.
+    steamAppID: steamAppIDFromThumb(info.thumb) ?? (info.steamAppID?.trim() || null),
+    salePrice,
+    normalPrice: Number.isFinite(normalPrice) ? normalPrice : salePrice,
+    savingsPercent: Math.round(Number(steam.savings) || 0),
+    dealID: steam.dealID
+  };
 }
