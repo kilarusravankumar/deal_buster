@@ -6,10 +6,15 @@ interface sortBarProps {
   onChange: (sort: SortType) => void,
   page: number,
   totalPages: number,
+  // Tab belongs to the grid's sort cycling only while the grid has the keyboard;
+  // elsewhere it moves focus. OpenTUI delivers keypresses to every subscriber, so
+  // this has to be checked explicitly.
+  focused?: boolean,
 }
 
-export function SortBar({ current, onChange, page, totalPages }: sortBarProps) {
+export function SortBar({ current, onChange, page, totalPages, focused = true }: sortBarProps) {
   useKeyboard((key) => {
+    if (!focused) return
     if (key.name === "tab") {
       const currentIndex = SORT_OPTIONS.indexOf(current)
       if (key.shift) {

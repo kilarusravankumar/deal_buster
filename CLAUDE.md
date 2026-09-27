@@ -164,7 +164,7 @@ Recommendations return **structured results** (not just text) so the TUI renders
 
 ## TUI changes
 
-- Landing screen: chat pane above/beside the deals grid. Agent greets : "What type of games do you like genre or I can help you identify the genre"
+- Landing screen: chat pane above/beside the deals grid. Agent greets : "Hello! I am DealScout, I can help you find Steam Game Deals."
 - No per-user identity: TUI always connects to the agent named `deal-scout` (single-owner app)
 - Deployed agent URL baked into the build; GitHub Action builds `bun build --compile` binaries for Linux/macOS into Releases
 - Stretch (Sunday, only if ahead): push-to-talk voice — `v` records via sox/ffmpeg → audio over WS → Whisper on Workers AI. No TTS.

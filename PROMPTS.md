@@ -29,6 +29,7 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > Do step 2, but start narrow: define the DealScout state type for setState(), wire the Llama 3.3 tool-calling loop, and implement just search_deals (CheapShark) as the first tool.
 >   Show me one real exchange where I ask for deals and the model calls the tool and replies with results. Stop there before adding the other tools.
 > for cheapShark api where we fetch deals right now we only focus steam games, so always pass `storeID as 1` add this to claude.md
+*Outcome:* added the Steam-only `storeID=1` note to CLAUDE.md and started the narrow step 2 (DealScoutState, Llama 3.3 loop, search_deals); interrupted before the live exchange and continued under Prompt 7.
 
 **Prompt 7** · 19:06
 > Do step 2, but start narrow: define the DealScout state type for setState(), wire the Llama 3.3 tool-calling loop, and implement just search_deals (CheapShark) as the first tool.
@@ -40,6 +41,7 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > 
 > but make sure you maintain two tsconfigs (tsconfig.json for the TUI, tsconfig.worker.json for the Worker
 > browser/Bun world — fetch, Request, Response, WebSocket, Headers doesn't collid with @cloudflare/workers-types
+*Outcome:* merged agent/ into the root project — worker/ plus shared fetch-based src/api/cheapshark.ts and src/api/steam.ts replacing the axios fetchers, two tsconfigs (tsconfig.json TUI, tsconfig.worker.json Worker); found Workers AI duplicates streamed tool-input deltas, so onChatMessage uses generateText and replays a UI message stream (commit de6a5ed).
 
 **Prompt 8** · 20:13
 > steam details api will respond with object with key `steamid` in few cases steam id  from cheapshark and new steam ID is different 
@@ -66,13 +68,16 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > 1. get_game_details tool + genre cache. Implement get_game_details as a new DealScout tool, reusing the shared @src/api/steam.ts. Given a steamAppID, it returns the game's details including genres and categories. Add an appID → { genres, categories, title } cache in DealScoutState (via setState): on every call, check the cache first and only hit Steam on a miss, then write the result back. Skip/return a clear "no Steam data" result when steamAppID is null. Keep the tool's output trimmed (agent-facing), same style as searchDeals.
 > 
 > 2. System-prompt guardrail against unverified genres. Update DealScout's system prompt to state explicitly: search_deals filters by title and price only — it does NOT filter by genre. The model must not claim or label a game's genre unless it has called get_game_details for that game and the returned genres confirm it. If the user asks for a genre (e.g. "roguelikes under $15"), the correct behavior is: call search_deals for the price/title constraints, then call get_game_details on the candidates and keep only those whose genres actually match — or, if it hasn't verified, say so and offer to check, rather than asserting the genre. Never present a price-filtered list as if it were genre-filtered.
+*Outcome:* mapped genres/categories through src/types/steamGame.ts and src/mapGameDetails.ts, added get_game_details with a gameTags cache in state plus the genre guardrail; also added worker/titles.ts titleMismatch guard after the model claimed Hover's genres for UBERMOSH, and pruned all history tool calls to stop Workers AI error 8007 poisoning later turns (committed in 9f55aa2).
 
 **Prompt 9** · 20:40
 > Steam is returning localized (Italian) data. get_game_details for Witcher 3 came back with genres: ["GDR"] and Italian categories ("Giocatore singolo", etc.). The appdetails call in src/api/steam.ts isn't pinning locale. Fix it to always request cc=us&l=english so genres/categories come back in English regardless of where the Worker's request originates. Then invalidate the poisoned cache: the existing gameTags entries were stored with localized strings, so either add a cache-version/schema tag and drop entries that don't match, or clear gameTags on load once. Confirm a re-fetch of an already-cached game now returns English.
+*Outcome:* pinned cc=us&l=english in src/api/steam.ts and added GAME_TAGS_VERSION with a dropStaleGameTags sweep; confirmed a previously cached game re-fetched in English (committed in 9f55aa2).
 
 **Prompt 10** · 20:42
 > create an subagent to fix 
 > CheapShark's steamAppID is sometimes unresolvable. For Witcher 3, search_deals returned steamAppID: "124923", and get_game_details("124923") returns found: false — but the real appID (292030) is embedded in the deal's thumb URL (.../store_item_assets/steam/apps/292030/...). Add a fallback in the search/enrichment layer: when a deal's steamAppID is missing or fails to resolve, extract the appID from the thumb URL and use that. Keep it defensive — if neither yields a valid appID, return the existing clean "no usable steamAppID" result. Add a small unit test pinning the Witcher 3 thumb-URL extraction (thumb contains 292030, field says 124923 → resolver picks 292030).
+*Outcome:* wrote .claude/agents/deal-data-fixer.md and ran the fix through an agent following it (the registry loads at session start, so the new type was not yet selectable); added steamAppIDFromThumb/steamAppIDCandidates and candidate-list resolution in loadGameTags, with tests/steamAppId.test.ts (committed in 9f55aa2).
 
 **Prompt 11** · 20:48
 > <task-notification>
@@ -150,6 +155,7 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > The TUI's own detail view still uses the raw `Game.steamAppID` from `getDeals`/`getGames` (`src/components/GameCard.tsx:36`, `GameGrid.tsx:107`, `SearchResultCard.tsx:32` → `index.tsx:45` → `useSteamGameDetails`), so pressing Enter on the Witcher 3 card in the grid hits `124923` and shows no details — the same quirk, in the TUI path. Fixing it means resolving at those call sites (or in the `getDeals`/`getGames` mapping) with the now-shared `steamAppIDCandidates`; I left it out as outside the requested scope, but it is a one-line-per-callsite follow-up and the resolver is already exported for it.</result>
 > <usage><subagent_tokens>68737</subagent_tokens><tool_uses>17</tool_uses><duration_ms>211294</duration_ms></usage>
 > </task-notification>
+*Outcome:* verified the agent's fix independently (live resolver probes, tests, both typechecks) and added a per-candidate try/catch so a 429 on one candidate no longer skips the next (committed in 9f55aa2).
 
 ## Session 2026-09-26 <!-- session:43b95d18-6ed2-4222-b918-a5ee5f30648a -->
 
@@ -195,10 +201,79 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > 
 > Out of scope: store selection (stays Steam-locked), pagination beyond limit, steamworks (skip unless trivial), and the watch/preference tools.
 > </pasted_content id="d65e">
+*Outcome:* added the semantic filters to search_deals with all wire names mapped in toDealsQuery() in src/api/cheapshark.ts, updated the system prompt and tests/searchDealsQuery.test.ts; live probes showed upperPrice=50 means "no maximum" (sent as 49.99) and /deals?steamAppID= matches CheapShark's id not Steam's, so an empty steamAppID lookup now returns an explanatory note (commit 9f55aa2).
 
 **Prompt 13** · 23:45
 > Put both tools `search_deals` and `get_game_details` in seperate files with respective names under tools directory
 > make sure you always follow seperation concern
+*Outcome:* extracted both tools to worker/tools/searchDeals.ts and worker/tools/getGameDetails.ts as dependency-injected factories, moved the state shape and the LoadGameTags contract to worker/state.ts to avoid a cycle, and added tests/tools.test.ts since Workers AI hit its daily free neuron cap mid-verification (commit 9f55aa2).
 
 **Prompt 14** · 23:48
 > commit when you are done.
+*Outcome:* committed the data-layer work as 9f55aa2 on the agentic branch (23 tests pass, worker typecheck clean, TUI at its 3 pre-existing component errors).
+
+**Prompt 15** · 23:50
+> /prompt-log
+*Outcome:* added these *Outcome:* lines to PROMPTS.md.
+
+**Prompt 16** · 23:52
+> leave it
+
+## Session 2026-09-27 <!-- session:0a1736b8-e835-48e4-a633-073ec266a2f3 -->
+
+**Prompt 17** · 00:10
+> build the TUI chat pane (client-side only). Do NOT touch worker/, DealScoutState, or any tool — this is purely the OpenTUI client.
+> 
+> Context. The agent works and is reachable over WebSocket at the deal-scout instance; the smoke test / tests/chat.ts already connects with AgentClient from agents/client in Bun — reuse that connection code, don't invent a new transport. The existing TUI has a deals grid and a GameCard component with a detail view (Enter to open). search_deals returns { count, deals: [...] } with the deal shape the grid already renders.
+> 
+> 
+> 
+> <pasted_content id="55c2">
+> Add a chat pane to the landing screen: a scrollable message transcript + a text input. Keep the existing deals grid — put the chat alongside it (split view) or as a toggleable pane, whichever is cleaner in OpenTUI; don't rip out the grid.
+> Connect to the deal-scout agent over WebSocket via AgentClient, reusing the smoke-test code. Manage message state in React (don't use useAgentChat).
+> Send typed user messages; render the agent's streamed text replies in the transcript as they arrive.
+> Render structured results as cards: read search_deals tool-invocation results from the message stream and render their deals[] using the existing GameCard component inline in the transcript. Enter on a card opens the existing detail view. Read the deal field names from src/lib/src/api — consume the shape, don't change it.
+> Keyboard UX: clear focus handling between the chat input and the rendered cards (e.g., a key to move focus from input to the latest card set and back). Keep it keyboard-driven, consistent with the existing TUI.
+> Connection states: show connecting / connected / error, and don't crash the TUI if the socket drops — surface it and allow retry.
+> 
+> Verify then stop: show the chat pane connecting, a text reply rendering, and a "deals under $15" query rendering as GameCards with Enter opening the detail view. Don't wire watches/preferences (those tools don't exist yet)
+> </pasted_content id="55c2">
+
+**Prompt 18** · 00:28
+> <task-notification>
+> <task-id>bgpd015oc</task-id>
+> <tool-use-id>toolu_013HtdAvuPdVrzuVRngngPTJ</tool-use-id>
+> <output-file>/tmp/claude-1000/-home-kreten-code-deal-buster/43b95d18-6ed2-4222-b918-a5ee5f30648a/tasks/bgpd015oc.output</output-file>
+> <status>completed</status>
+> <summary>Background command "Tighten harness assertions and re-run" completed (exit code 0)</summary>
+> </task-notification>
+
+**Prompt 19** · 00:28
+> <task-notification>
+> <task-id>b9wz97j5j</task-id>
+> <tool-use-id>toolu_01CYCoFmerPUSLYt8uX4mehe</tool-use-id>
+> <output-file>/tmp/claude-1000/-home-kreten-code-deal-buster/43b95d18-6ed2-4222-b918-a5ee5f30648a/tasks/b9wz97j5j.output</output-file>
+> <status>completed</status>
+> <summary>Background command "Wait for harness to finish" completed (exit code 0)</summary>
+> </task-notification>
+
+**Prompt 20** · 00:32
+> <task-notification>
+> <task-id>bln45yi12</task-id>
+> <tool-use-id>toolu_017sFKVTJQhbdEdFCgLoG3cb</tool-use-id>
+> <output-file>/tmp/claude-1000/-home-kreten-code-deal-buster/43b95d18-6ed2-4222-b918-a5ee5f30648a/tasks/bln45yi12.output</output-file>
+> <status>completed</status>
+> <summary>Background command "Full live verification after history clear" completed (exit code 0)</summary>
+> </task-notification>
+
+**Prompt 21** · 00:32
+> <task-notification>
+> <task-id>b7yxxd3ki</task-id>
+> <tool-use-id>toolu_015zRE42wpcVc8uEEstfZkzE</tool-use-id>
+> <output-file>/tmp/claude-1000/-home-kreten-code-deal-buster/43b95d18-6ed2-4222-b918-a5ee5f30648a/tasks/b7yxxd3ki.output</output-file>
+> <status>completed</status>
+> <summary>Background command "Wait for verification run" completed (exit code 0)</summary>
+> </task-notification>
+
+**Prompt 22** · 00:37
+> [Image #3] deal scout response is empty

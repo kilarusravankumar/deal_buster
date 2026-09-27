@@ -56,10 +56,7 @@ export default function GameCard({ game, onGameClickHandler, selected, onSelect 
           <span fg="#888888">steamAppID : {game.steamAppID} , appID: {game.gameID}</span>
         </text>
         <text>
-          <span fg="#9CA3AF">{game.steamRatingText || "No rating"}</span>
-          {game.steamRatingPercent && game.steamRatingPercent !== "0"
-            ? ` (${game.steamRatingPercent}%)`
-            : ""}
+          <span fg="#9CA3AF">{ratingLabel(game)}</span>
         </text>
         <text>
           <span fg="#6B7280">Press enter⏎ to view more details</span>
@@ -68,6 +65,19 @@ export default function GameCard({ game, onGameClickHandler, selected, onSelect 
     </box>
   )
 }
+// CheapShark reports "0" for an unknown rating, and deals that reach the card via
+// the agent carry the percentage without Steam's wording for it — so each half of
+// the label is optional and "No rating" is only for having neither.
+function ratingLabel(game: Game): string {
+  const text = game.steamRatingText?.trim()
+  const percent = game.steamRatingPercent
+  const hasPercent = Boolean(percent) && percent !== "0"
+  if (text && hasPercent) return `${text} (${percent}%)`
+  if (text) return text
+  if (hasPercent) return `${percent}% positive`
+  return "No rating"
+}
+
 function getInitials(title: string): string {
   return title
     .split(/[\s\-:]+/)

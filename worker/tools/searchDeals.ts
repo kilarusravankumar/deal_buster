@@ -91,13 +91,15 @@ export function searchDealsTool({ defaultMaxPrice }: SearchDealsToolDeps) {
         .enum(SORT_OPTIONS)
         .optional()
         .describe(
-          "Result ordering: Price for 'cheapest', Savings for 'biggest discount', Recent for 'newest deals', Metacritic or Reviews for quality. Defaults to DealRating."
+          `Result ordering: Price for 'cheapest', Savings for 'biggest discount', Recent for 'newest deals', Metacritic or Reviews for quality. Defaults to DealRating. Well reviewed game then pass .
+              DealRating, Title, Savings, Price, Metacritic, Reviews, ReviewCount, Release, Store, Recent`
+
         ),
       sortDescending: z
         .boolean()
         .optional()
         .describe(
-          "Reverse the ordering to highest-first, e.g. 'most expensive' or 'best rated first' → true."
+          "Reverse the ordering to highest-first, e.g. 'most expensive' or 'best rated first' → true. or parctically steals then sort by savings or highest savings then sortBy savings"
         ),
       limit: z.coerce
         .number()

@@ -16,6 +16,10 @@ interface GameGridProps {
   // Changes when the result set is replaced rather than appended to, which is
   // the only time the existing scroll offset stops making sense.
   resetKey?: string,
+  // OpenTUI delivers every keypress to every subscriber, so the grid has to be
+  // told when something else — the chat input, the chat cards — owns the
+  // keyboard. Defaults to true for callers that render the grid alone.
+  focused?: boolean,
 }
 
 // border (2) + a column for the vertical scrollbar
@@ -30,6 +34,7 @@ export default function GameGrid({
   hasMore = false,
   onLoadMore,
   resetKey,
+  focused = true,
 }: GameGridProps) {
   const boxRef = useRef<ScrollBoxRenderable | null>(null)
   const { width: termWidth } = useTerminalDimensions()
@@ -79,7 +84,7 @@ export default function GameGrid({
   }
 
   useKeyboard((key) => {
-    if (games.length === 0) return
+    if (!focused || games.length === 0) return
     switch (key.name) {
       case "left":
       case "h":
