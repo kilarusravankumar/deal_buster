@@ -915,3 +915,5 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > "Watch Baldur's Gate 3 and alert me under $30"
 > "What am I watching?"
 > 3, Rebrand the header: change the title from "Agent Starter / AI Chat" to Deal Buster.
+
+*Outcome:* set the dark default in index.html's inline script (before first paint, localStorage still overrides), rebranded the header to Deal Buster / Deal Scout, and swapped the four starter prompts for five that each hit a real tool; deployed and verified the live page serves dark-by-default with the new prompts, after an edge-cache HIT briefly served the old bundle.
