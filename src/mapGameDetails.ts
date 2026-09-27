@@ -21,6 +21,8 @@ export default function mapToGameDetails(response: SteamAppDetailsResponse, appI
     publishers: data.publishers ?? [],
     platforms: data.platforms,
     screenshots: (data.screenshots ?? []).map((shot) => shot.path_full),
+    genres: (data.genres ?? []).map((genre) => genre.description),
+    categories: (data.categories ?? []).map((category) => category.description),
     totalRecommendations: data.recommendations?.total ?? 0,
   };
 }
