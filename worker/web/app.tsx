@@ -283,6 +283,13 @@ function Chat() {
 
   const agent = useAgent<DealScout>({
     agent: "DealScout",
+    // Same single shared instance the TUI and the price-check workflow use, i.e.
+    // /agents/deal-scout/deal-scout. Without this, `name` defaults to "default"
+    // and the browser gets its OWN Durable Object: a separate watchlist, and no
+    // price alerts, because those are broadcast to the "deal-scout" instance.
+    // The host is deliberately not set — PartySocket defaults to
+    // window.location.host, so this is same-origin and needs no build-time URL.
+    name: "deal-scout",
     onOpen: useCallback(() => setConnected(true), []),
     onClose: useCallback(() => setConnected(false), []),
     onError: useCallback(

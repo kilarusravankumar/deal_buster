@@ -12,7 +12,16 @@ import { AgentClient } from "agents/client";
 import { getCurrentPrice, searchDeals } from "../src/api/cheapshark";
 
 const HOST = process.env.AGENT_HOST ?? "localhost:8787";
-const TOKEN = process.env.DEV_TRIGGER_TOKEN ?? "local-dev-price-check";
+// Read from the environment, never defaulted: a token committed here would be a
+// published guess at the deployed Worker's, and /dev/price-check sends email.
+const TOKEN = process.env.DEV_TRIGGER_TOKEN ?? "";
+if (TOKEN === "") {
+  console.error(
+    "set DEV_TRIGGER_TOKEN to the value in .dev.vars, e.g.\n" +
+      "  DEV_TRIGGER_TOKEN=$(grep DEV_TRIGGER_TOKEN .dev.vars | cut -d= -f2) bun tests/priceCheck.manual.ts"
+  );
+  process.exit(1);
+}
 const client = new AgentClient({ host: HOST, agent: "deal-scout", name: "deal-scout" });
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -67,7 +76,7 @@ await client.ready;
 console.log(`connected to deal-scout at ${HOST}`);
 
 // ── pick a real game that is on sale right now ───────────────────────────────
-const [deal] = await searchDeals({ maxPrice: 15, limit: 1, sortBy: "Deal Rating" });
+const [deal] = await searchDeals({ maxPrice: 15, limit: 1 });
 if (deal == null) fail("CheapShark returned no deals to build the test watch from");
 const live = await getCurrentPrice(deal.gameID);
 if (live == null) fail(`no current Steam price for ${deal.title} (${deal.gameID})`);

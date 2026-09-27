@@ -5,10 +5,18 @@
   "compatibility_date": "2026-06-11",
   "compatibility_flags": ["nodejs_compat"],
   "ai": { "binding": "AI", "remote": true },
+  // The web chat, built by `bun run web:build` (vite.web.config.ts) and served at
+  // /. `bun run predeploy` builds it, so a deploy can never ship a stale or
+  // missing bundle — that is what made the deployed root 404.
+  //
+  // run_worker_first lists the paths that must reach the Worker even though
+  // static assets are matched first: the agent's WebSocket and HTTP routes, the
+  // MCP OAuth callback, and the dev price-check trigger.
   "assets": {
-    "directory": "./public",
+    "binding": "ASSETS",
+    "directory": "./dist/web",
     "not_found_handling": "single-page-application",
-    "run_worker_first": ["/agents/*", "/oauth/*"]
+    "run_worker_first": ["/agents/*", "/oauth/*", "/dev/*"]
   },
   // The workflow shares this Worker's bindings, so it gets AI, DealScout and the
   // Resend secrets without any extra wiring.

@@ -634,10 +634,16 @@ export default {
     if (new URL(request.url).pathname === "/dev/price-check") {
       return await handleDevPriceCheck(request, env);
     }
-    return (
-      (await routeAgentRequest(request, env)) ||
-      new Response("Not found", { status: 404 })
-    );
+    // Agent routing first, always: the chat WebSocket and the agent's HTTP
+    // routes must never be shadowed by a static file.
+    const agentResponse = await routeAgentRequest(request, env);
+    if (agentResponse != null) return agentResponse;
+
+    // Everything else is the web chat. Assets are matched before the Worker for
+    // paths outside `run_worker_first`, so this mainly catches the ones inside
+    // it; serving them here too means one fall-through path rather than two
+    // answers for "not an agent route".
+    return await env.ASSETS.fetch(request);
   }
 } satisfies ExportedHandler<Env>;
 

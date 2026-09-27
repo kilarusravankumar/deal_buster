@@ -37,7 +37,7 @@ seeder.setState({
 await sleep(1500)
 
 const res = await fetch("http://localhost:8787/dev/price-check", {
-  method: "POST", headers: { "x-dev-token": "local-dev-price-check" }
+  method: "POST", headers: { "x-dev-token": process.env.DEV_TRIGGER_TOKEN ?? "" }
 })
 console.log(`trigger → ${res.status} ${(await res.text()).replace(/\s+/g, " ")}`)
 

@@ -888,3 +888,16 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > Verify then stop: locally (wrangler dev) — add a watch with a target at or above the current price, hit POST /dev/price-check, and confirm: an alert appears in the chat AND an email is attempted (log the Resend response). Then hit it again and confirm the dedupe suppresses a repeat. Commit when green.
 
 *Outcome:* added worker/priceCheckWorkflow.ts, worker/priceCheck.ts (pure qualifyDrops + alert rendering) and worker/resend.ts, getCurrentPrice in src/api/cheapshark.ts, and the trigger/claim/broadcast side in worker/server.ts plus the PRICE_CHECK_WORKFLOW binding; alerts render in the TUI and web clients; folded the state write and the email into one claim-first step per the retry constraint, and deviated from the spec on dedupe (new lows only) — verified live against wrangler dev, 52 tests pass (commit 476fd5c).
+
+**Prompt 30** · 18:01
+> <pasted_content id="6098">
+> The deployed Worker 404s at / because the web chat frontend (separate Vite app) isn't bundled into the deploy. Wire it so the Worker serves the web chat at /:
+> 
+> Add a build step that builds the web chat to a dist/ dir.
+> Configure the static-assets binding in wrangler.jsonc to serve that dist/ at /, and make the Worker's fetch handler fall through to assets for non-agent routes (agent routing stays first).
+> Make the web chat's WebSocket target same-origin (wss://<current host>/agents/deal-scout/deal-scout), not a hardcoded localhost — so it connects to the prod agent when served from prod, and to local when run locally.
+> Add a predeploy script so wrangler deploy builds the frontend first.
+> Redeploy and confirm the root URL loads the chat and connects. Keep agent routing and the /dev route intact.
+> </pasted_content id="6098">
+> 
+> `
