@@ -901,3 +901,5 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > </pasted_content id="6098">
 > 
 > `
+
+*Outcome:* added vite.web.config.ts (client-only build to dist/web) with a predeploy hook, pointed the assets binding at it with an ASSETS fall-through in the Worker's fetch handler and /dev/* added to run_worker_first, and pinned the web chat to the deal-scout instance — it had defaulted to "default", giving the browser its own Durable Object and no price alerts; the WebSocket was already same-origin, so no hardcoded host existed to remove. Deployed and verified the root URL serves the chat and the prod agent accepts a WebSocket; also removed a committed dev-token default that matched the deployed secret (commit 913fcee).
