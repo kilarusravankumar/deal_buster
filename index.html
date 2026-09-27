@@ -11,7 +11,10 @@
     <link rel="icon" href="/favicon.ico" />
     <script>
       (() => {
-        const mode = localStorage.getItem("theme") || "light";
+        // Dark by default: this is a terminal-adjacent tool, usually opened in a
+        // dark editor. Set here rather than in React so the first paint is
+        // already dark — flipping it after hydration is a white flash.
+        const mode = localStorage.getItem("theme") || "dark";
         document.documentElement.setAttribute("data-mode", mode);
         document.documentElement.style.colorScheme = mode;
       })();

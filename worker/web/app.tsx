@@ -493,11 +493,11 @@ function Chat() {
         <div className="max-w-3xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-3">
             <h1 className="text-lg font-semibold text-kumo-default">
-              <span className="mr-2">⛅</span>Agent Starter
+              <span className="mr-2">🎮</span>Deal Buster
             </h1>
             <Badge variant="secondary">
               <ChatCircleDotsIcon size={12} weight="bold" className="mr-1" />
-              AI Chat
+              Deal Scout
             </Badge>
           </div>
           <div className="flex items-center gap-3">
@@ -705,14 +705,18 @@ function Chat() {
           {messages.length === 0 && (
             <Empty
               icon={<ChatCircleDotsIcon size={32} />}
-              title="Start a conversation"
+              title="Find a Steam deal"
               contents={
                 <div className="flex flex-wrap justify-center gap-2">
+                  {/* Each of these exercises a real tool: search_deals on its
+                      own, then with a genre (which forces get_game_details to
+                      verify), then add_watch and list_watches. */}
                   {[
-                    "What's the weather in Paris?",
-                    "What timezone am I in?",
-                    "Calculate 5000 * 3",
-                    "Remind me in 5 minutes to take a break"
+                    "Best deals under $10",
+                    "Any deals on Hades?",
+                    "Well-reviewed RPGs under $20",
+                    "Watch Baldur's Gate 3 and alert me under $30",
+                    "What am I watching?"
                   ].map((prompt) => (
                     <Button
                       key={prompt}
