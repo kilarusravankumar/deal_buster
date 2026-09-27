@@ -312,3 +312,579 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > direct agent chat with `http://localhost:5173/` is working fine , but agent chat at TUI side panel is not working
 > let plan to debug the issue and fix it
 > first start by adding console.log statements of agent response in TUI . (keep `d` as toggle for console in TUI)
+
+*Outcome:* added src/util/debug.ts (dlog + optional DEALSCOUT_DEBUG_LOG file sink) and traced every frame, send and turn failure in src/hooks/useDealScout.ts; made ctrl+d toggle the console so it works while the chat input has focus (bare `d` kept) and hinted both in HelpBar — but the pane turned out to work on the current tree in a real pty and headlessly, so no chat bug was reproduced; prime suspects left for the user are wrangler dev being down (the TUI talks to :8787, while :5173 runs its own worker copy) or the web tab sharing the single deal-scout instance (commit 707fc3d).
+
+**Prompt 25** · 16:48
+> build the PriceCheckWorkflow — a Cloudflare Workflow that alerts on watched-game price drops. This is the app's scheduled/coordination layer
+> so , let me think out loud 
+> we will send email notification via email via Resend (HTTP API).
+> 
+> let,s plan the implementation start with 
+> 
+> 
+> <pasted_content id="6098">
+> Build a WorkflowEntrypoint class PriceCheckWorkflow with durable, individually-retrying steps:
+> 
+> load — receive the watchlist. Params: { agentName: string; watches: Watch[] } passed by the trigger. (Keep the workflow fed by params rather than reaching into the DO for reads; it calls back to the agent only to write — see step 5.)
+> fetchPrices — for each watch, fetch the current CheapShark sale price (reuse the shared api layer; add a getCurrentPrice(gameID or steamAppID) helper if one doesn't exist, honoring the Steam store lock). Bounded concurrency; tolerate individual failures (skip that watch, don't fail the step).
+> compare — keep only watches where currentPrice <= targetPrice and currentPrice !== lastNotifiedPrice (dedupe: don't re-alert the same price every run).
+> writeAlert — for the qualifying drops, call env.AI (Llama 3.3) once to generate a short, friendly alert summary. If the model call fails, fall back to a plain templated string so the alert still goes out — never let alert-text generation block the notification.
+> notify — two side effects per qualifying drop: (a) call back to the DealScout instance (agentName) to push the alert over its WebSocket AND update that watch's lastNotifiedPrice in state; (b) send an email via Resend.
+> </pasted_content id="6098">
+
+*Outcome:* no change (planning turn) — researched the api layer, worker state and the installed Workflow surface, verified CheapShark /games?id= live, and wrote the implementation plan; settled digest-vs-per-game email, the Resend sender, and new-lows-only dedupe with the user.
+
+**Prompt 26** · 16:53
+> Resend email: POST https://api.resend.com/emails with Authorization: Bearer ${env.RESEND_API_KEY}, to: env.NOTIFY_EMAIL, a from of onboarding@resend.dev (Resend's test sender, which delivers to the account owner's own verified email without a domain — leave a comment noting this is the no-domain path), subject like "💰 Price drop: <title>", and both text and html bodies. One email summarizing all drops in a run is fine (fewer sends); because i hate to spam others
+> 
+> Triggers:
+> 
+> Scheduled: the DealScout agent's existing schedule() (every 24h) creates a workflow instance, passing its own instance name + current watches.
+> Manual (as a side door): add a dev route (e.g. POST /dev/price-check) on the Worker that creates a workflow instance immediately. Guard it minimally (dev-only / simple token); leave a comment that it's for demos. 
+> 
+> Config: add the Workflow binding to wrangler.jsonc (workflows entry: binding, name, class_name), ensure the workflow has the AI binding, and declare RESEND_API_KEY + NOTIFY_EMAIL as secrets (read from env, never hardcoded).
+> 
+> Constraints:
+> 
+> Steps must be idempotent-ish and retry-safe: fetching a price twice is fine; sending an email twice is not — do the lastNotifiedPrice update in the same logical step as the send so a retry after a successful send doesn't double-notify.
+> Don't break existing tools/state; additive only.
+> 
+> Tests: unit-test the compare/dedupe logic (drop below target alerts; same price twice doesn't; above target doesn't) with mocked prices. Run bun test + worker typecheck.
+> 
+> Verify then stop: locally (wrangler dev) — add a watch with a target at or above the current price, hit POST /dev/price-check, and confirm: an alert appears in the chat AND an email is attempted (log the Resend response). Then hit it again and confirm the dedupe suppresses a repeat. Commit when green.
+
+*Outcome:* superseded by the identical Prompt 29 below, which is where the work happened.
+
+**Prompt 27** · 17:10
+> <task-notification>
+> <task-id>adae0128275e4e2dc</task-id>
+> <tool-use-id>toolu_01YUp7kvM3vtsuDVZ5vDkwAG</tool-use-id>
+> <output-file>/tmp/claude-1000/-home-kreten-code-deal-buster/43b95d18-6ed2-4222-b918-a5ee5f30648a/tasks/adae0128275e4e2dc.output</output-file>
+> <status>completed</status>
+> <summary>Agent "Explore CheapShark API layer" finished</summary>
+> <note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+> <result>Findings on the shared data-access layer.
+> 
+> ## 1. `src/api/` — two files only
+> 
+> ### `/home/kreten/code/deal_buster/src/api/cheapshark.ts`
+> 
+> Comment at top is explicit: "`fetch`-only (no axios): the same module has to compile and run under Bun for the TUI and under workerd for the agent tools." Any Workflow can import it directly.
+> 
+> Constants: `export const STEAM_STORE_ID = "1"` (line 13), `const BASE_URL = "https://www.cheapshark.com/api/1.0"`, `const USER_AGENT = "deal_busters/0.1"`, `export const MAX_SEARCH_LIMIT = 60`, `const MAX_AGENT_RESULTS = 20`.
+> 
+> The single fetch wrapper (private, not exported — a Workflow cannot reuse it unless it re-exports or duplicates):
+> 
+> ```ts
+> async function request(
+>   path: string,
+>   params: Record&lt;string, string&gt;,
+>   signal?: AbortSignal
+> ): Promise&lt;Response&gt; {
+>   const response = await fetch(`${BASE_URL}${path}?${new URLSearchParams(params)}`, {
+>     headers: { "User-Agent": USER_AGENT },
+>     signal
+>   });
+>   if (!response.ok) {
+>     throw new Error(
+>       `CheapShark ${path} failed: ${response.status} ${response.statusText}`
+>     );
+>   }
+>   return response;
+> }
+> ```
+> 
+> Exported functions:
+> 
+> - `export async function getDeals(params: QueryParams, signal?: AbortSignal): Promise&lt;DealsResponse&gt;` — hits `GET /deals`. Steam lock: `storeID: STEAM_STORE_ID` hardcoded into the query object, plus `onSale: "1"`, `sortBy`, `pageNumber`, `pageSize`, optional `AAA=1`. Returns `{ data: Game[]; totalPageCount: number }`, total read from the `x-total-page-count` response header, falling back to 1.
+> - `export async function getGames({ title, limit = MAX_SEARCH_LIMIT, exact = false, signal }: SearchOptions): Promise&lt;SearchGame[]&gt;` — hits `GET /games?title=&amp;limit=&amp;exact=0|1`. **No `storeID` at all** (the `/games` title-search endpoint does not take one), so this one is not Steam-locked.
+> - `export function steamAppIDFromThumb(thumb: string | null | undefined): string | null` — regex `/\/steam\/apps\/(\d+)\//` against the thumb URL. Deliberately does not match `/steam/subs/&lt;digits&gt;/` (packages, which Steam appdetails does not know).
+> - `export function steamAppIDCandidates(deal: { steamAppID?: string | null; thumb?: string | null }): string[]` — thumb-derived id first, CheapShark's `steamAppID` field second, deduped, digits-only.
+> - `export function toDealsQuery(input: SearchDealsInput): Record&lt;string, string&gt;` — pure semantic→wire mapping. Steam lock again hardcoded: `storeID: STEAM_STORE_ID`. Also `pageSize: clampInt(limit, 1, MAX_AGENT_RESULTS)`, `sortBy` default `"DealRating"`, `onSale` default true. Notable quirk encoded here: `upperPrice=50` means "no maximum" to CheapShark, so a real $50 ceiling is sent as `"49.99"` (`UNLIMITED_UPPER_PRICE = 50`, `JUST_UNDER_UNLIMITED = "49.99"`). `maxAge` clamped 1–2500 hours. All out-of-range LLM input is clamped, never rejected.
+> - `export async function searchDeals(input: SearchDealsInput): Promise&lt;Deal[]&gt;` — `GET /deals` with `toDealsQuery(input)`; **no `signal` parameter** (unlike `getDeals`/`getGames`). Slices to `pageSize` client-side, maps `Game` → trimmed `Deal`, resolving `steamAppID: steamAppIDCandidates(deal)[0] ?? null` and nulling zero scores via `positiveNumber`.
+> 
+> ### `/home/kreten/code/deal_buster/src/api/steam.ts`
+> 
+> - `export async function getSteamGameDetails(appId: string | number, signal?: AbortSignal): Promise&lt;GameDetails | null&gt;`
+> - URL: `` `${APPDETAILS_URL}?appids=${numericId}&amp;${LOCALE_PARAMS}` `` where `APPDETAILS_URL = "https://store.steampowered.com/api/appdetails"` and `LOCALE_PARAMS = "cc=us&amp;l=english"` (locale pinned because Steam localizes genres/categories by egress IP — a Worker in Milan gets `["GDR"]`).
+> - Throws on `!response.ok`; returns `null` when `success: false` (via `mapToGameDetails`). **Returns no price** — the `GameDetails` type has no price fields, so Steam's own `price_overview` is not parsed today.
+> 
+> ### Answer to your key question
+> 
+> **There is no `getCurrentPrice(gameID)` and no single-game price lookup anywhere.** Only:
+> - `/deals` list (twice: `getDeals` for the TUI, `searchDeals` for the agent),
+> - `/games?title=` search.
+> 
+> The nearest thing to a single-game price is `searchDeals({ title, exact: true, limit: 1 })` or `searchDeals({ steamAppID })` — and the latter is documented as unreliable (see §3).
+> 
+> ## 2. `Deal` and related types
+> 
+> `Deal` is declared **in the api module, not in `src/types/`** — `/home/kreten/code/deal_buster/src/api/cheapshark.ts:90-101`:
+> 
+> ```ts
+> export interface Deal {
+>   gameID: string;
+>   dealID: string;
+>   title: string;
+>   salePrice: number;
+>   normalPrice: number;
+>   savingsPercent: number;
+>   steamAppID: string | null;
+>   steamRatingPercent: number | null;
+>   metacriticScore: number | null;
+>   thumb: string;
+> }
+> ```
+> 
+> Related types:
+> - `Game` — `/home/kreten/code/deal_buster/src/types/game.ts:27` — the raw `/deals` row, **all fields strings** except `releaseDate: number` and `lastChange: number`. Includes `dealRating`, `steamRatingText`, `steamRatingCount`, `isOnSale`, `savings`, `internalName`, `metacriticLink`, `storeID`.
+> - `SearchGame` — `/home/kreten/code/deal_buster/src/types/searchGame.ts:16` — the `/games` row: `gameID`, `steamAppID: string | null`, `cheapest`, `cheapestDealID`, `external`, `internalName`, `thumb`. No sale price, no savings, no ratings; `steamAppID` frequently null.
+> - `DealsResponse`, `SearchOptions`, `SearchDealsInput` — all in `cheapshark.ts`.
+> - `GameDetails` / `SteamAppData` — `/home/kreten/code/deal_buster/src/types/steamGame.ts`.
+> - `ShownDeal`, `Watch` — `/home/kreten/code/deal_buster/worker/state.ts:7,33`.
+> - `DealSet { deals: Deal[] }` — `/home/kreten/code/deal_buster/src/types/chat.ts:15`.
+> - `dealToGame(deal: Deal): Game` — `/home/kreten/code/deal_buster/src/util/dealToGame.ts`, widens the trimmed shape for the TUI card, hardcoding `storeID: "1"` and `releaseDate: 0`.
+> 
+> ### ID semantics (this is the crux for a price-check Workflow)
+> 
+> - **`gameID`** — CheapShark's own game id. `worker/state.ts:9` calls it "CheapShark's stable game id. The dedupe key: one watch per gameID." This is the id `Watch` is keyed by, and therefore the id a Workflow will have in hand.
+> - **`dealID`** — an opaque, URL-encoded token for one *store+price* row (e.g. `2ZZIGlBPy6LFiNHZvZHiF2n43t%2BdFr9LkWzlgg6CdCg%3D`). It identifies a specific deal listing, so it changes when the price changes — **not stable for a watch**. Carried on `Deal` but never used for any lookup in the codebase.
+> - **`steamAppID`** — on `Deal` this is the *resolved* Steam app id, i.e. `steamAppIDCandidates(deal)[0]`, which prefers the id embedded in the thumb URL over CheapShark's field. It's what Steam's appdetails answers for.
+> - **CheapShark's raw `steamAppID` field** (on `Game`/`SearchGame`) is "sometimes stale". The documented example, repeated in three places: The Witcher 3: Wild Hunt — Complete Edition reports `124923` (no such Steam app) while the same row's thumb points at `/steam/apps/292030/` — the real app. The thumb wins because it is a path into Steam's asset store for that exact item; the field is only a fallback for rows whose thumb is hosted elsewhere.
+> - `src/mapGameDetails.ts` adds one more wrinkle: "The store echoes back its own appid key, which can differ from the one we asked for, so take whatever single key came back" — it reads `Object.keys(response)[0]` and returns `appId: data.steam_appid` (Steam's canonical id), not the requested one.
+> - `worker/titles.ts` (`titlesLookAlike`) is the guard against a wrong `steamAppID`: it fuzzy-compares the requested title to the title Steam returned. Editions/sequels match ("Hades" vs "Hades II"), unrelated games don't; an empty side matches.
+> 
+> **Stable for a Workflow: `gameID`.** `dealID` is not. `steamAppID` is usable only after candidate resolution and is absent on some rows.
+> 
+> ## 3. `/games?id=` and `/deals?id=` — not used, and no caching/retry in the api layer
+> 
+> Neither endpoint appears anywhere in the repo. `/games` is only ever called with `title`/`limit`/`exact`; `/deals` only ever as a filtered list. CheapShark's `/games?id=&lt;gameID&gt;` (which returns `deals: [{ dealID, storeID, price, retailPrice, savings }]` for exactly one game) and `/deals?id=&lt;dealID&gt;` are both unused — this is the obvious gap for a per-watch price check.
+> 
+> Conventions actually present in the api layer:
+> - **Error handling:** throw-on-`!response.ok` with a formatted message (`CheapShark ${path} failed: ${status} ${statusText}`, `Steam appdetails failed: ...`). Callers catch and convert. `searchDealsTool` catches and returns `{ error: message }`; `useDeals.ts` sets error state and specifically swallows `AbortError` as "the cleanup path, not a failure to report".
+> - **No caching, no rate limiting, no retry, no backoff anywhere in `src/api/`.** The only cache in the project is at the agent-state layer: `gameTags: Record&lt;string, CachedGameTags&gt;` in `worker/state.ts`, versioned by `GAME_TAGS_VERSION = 2`, read/written by `DealScout.loadGameTags` in `worker/server.ts:155+`. That cache is Steam-tags-only — there is no price cache.
+> - **Retry-ish behaviour** exists only in `loadGameTags`: a per-candidate `try/catch` that logs and continues, so "a transport failure on one candidate (a 429, a 5xx) must not cost us the next one". Failures are deliberately *not* cached, because Steam returns `success: false` for regional restrictions and delisted apps too.
+> - **Cancellation** is the `AbortSignal` passed through `request` — used by the TUI hooks (`AbortController` + 300ms debounce in `useDeals.ts`), but `searchDeals` does not accept one.
+> - No `fetch` wrapper is exported. A Workflow importing this module gets `getDeals`/`getGames`/`searchDeals` but would have to construct its own request for a new endpoint, or the module would need a new exported function using the existing private `request`.
+> 
+> ## 4. `worker/tools/searchDeals.ts`
+> 
+> `/home/kreten/code/deal_buster/worker/tools/searchDeals.ts`. Header: "the model's only route to CheapShark." The module owns only the tool contract; the HTTP call and wire mapping stay in `src/api/cheapshark`.
+> 
+> ```ts
+> export interface SearchDealsToolDeps {
+>   defaultMaxPrice: number | null;
+>   recordShownDeals: RecordShownDeals;
+> }
+> export function searchDealsTool({ defaultMaxPrice, recordShownDeals }: SearchDealsToolDeps)
+> ```
+> 
+> Returns an AI-SDK `tool({ description, inputSchema, execute })`. The zod schema mirrors `SearchDealsInput` field-for-field, with `sortBy: z.enum(SORT_OPTIONS)` imported from `src/types/sort` so the TUI sort bar and the tool cannot drift. Every description carries an example trigger phrase because the schema is read by Llama 3.3.
+> 
+> Call into the api layer — a single line, no signal, no retry:
+> ```ts
+> const ceiling = filters.maxPrice ?? defaultMaxPrice ?? undefined;
+> const deals = await searchDeals({ ...filters, maxPrice: ceiling });
+> ```
+> 
+> Return shapes (three):
+> - `{ count: number, deals: Deal[] }` on success
+> - `{ count: 0, deals, note: "no deal indexed under steamAppID X — CheapShark indexes its own appID, which can differ from Steam's. Search by title instead." }` when a `steamAppID` filter returned nothing
+> - `{ error: string }` on throw
+> 
+> Recording shown deals — only non-empty results overwrite the snapshot, "or 'watch the second one' would break right after a fruitless query":
+> ```ts
+> if (deals.length &gt; 0) {
+>   recordShownDeals(deals.map((deal) =&gt; ({
+>     gameID: deal.gameID,
+>     title: deal.title,
+>     salePrice: deal.salePrice,
+>     ...(deal.steamAppID ? { steamAppID: deal.steamAppID } : {})
+>   })));
+> }
+> ```
+> `RecordShownDeals = (deals: ShownDeal[]) =&gt; void` (`worker/state.ts:190`); it writes `lastShownDeals`, which `worker/tools/gameRefs.ts#resolveShownDeal` reads to turn "the second one" into a `gameID`.
+> 
+> ## 5. Tests covering the api layer
+> 
+> Runner is `bun test` (`package.json`: `"test": "bun test"`). Files ending `.manual.ts` are not picked up by the test glob.
+> 
+> **Pure / no network:**
+> - `/home/kreten/code/deal_buster/tests/searchDealsQuery.test.ts` — 9 tests against `toDealsQuery` + `STEAM_STORE_ID`. Asserts the default query reproduces the pre-filter query exactly; **"the store is locked to Steam whatever the input says"**; semantic→wire name mapping; the `upperPrice=50`→`49.99` rule; clamping rather than rejecting; `onSale` default; `exact` dropped without a title; `steamAppID` passthrough; absent filters emit no parameter.
+> - `/home/kreten/code/deal_buster/tests/steamAppId.test.ts` — 5 tests on `steamAppIDCandidates` / `steamAppIDFromThumb`: thumb beats a stale field, thumb alone suffices, field alone when the thumb has no id, no candidates when neither source is usable, dedupe when both agree.
+> - `/home/kreten/code/deal_buster/tests/titles.test.ts` — 3 tests on `titlesLookAlike`.
+> - `/home/kreten/code/deal_buster/tests/watchTools.test.ts` — watch tools, `gameRefs` resolution, and `migrateDealScoutState` v1→v2, all with an in-memory `WatchStore` fake.
+> 
+> **Hits the real network (no fixtures, no fetch mock):**
+> - `/home/kreten/code/deal_buster/tests/tools.test.ts` — calls `tool.execute` directly with `CALL_CONTEXT = { toolCallId: "test", messages: [] } as never`. The two `search_deals` tests make live CheapShark requests: one asserts every returned `salePrice &lt;= 10` via the stored ceiling fallback; the other asserts `count === 0` plus the note text for `steamAppID: "292030"` (the real Witcher 3 app that CheapShark indexes as 124923). The `get_game_details` tests inject a `tagsFor()` fake `LoadGameTags`, so those do not touch Steam.
+> - `/home/kreten/code/deal_buster/tests/agent.smoke.test.ts` — connects an `AgentClient` to a running Worker.
+> 
+> There is **no test for `getDeals`, `getGames`, `searchDeals`'s HTTP path, `request`'s error formatting, or `getSteamGameDetails`** — the only api-layer coverage is of the pure helpers plus the two live `search_deals` calls. No fetch-mocking infrastructure exists to build on.
+> 
+> **Gap summary for the Workflow:** `wrangler.jsonc` has no `workflows` binding yet (only `ai`, `assets`, `durable_objects` for `DealScout`). `worker/state.ts` already references a `PriceCheckWorkflow` in two comments (`Watch.lastNotifiedPrice` "Written by PriceCheckWorkflow so it does not alert twice for the same drop") and `tests/watchTools.test.ts:91` asserts a new watch never carries one — so the state contract is in place but no workflow code, no `getCurrentPrice`, and no `/games?id=` call exists.</result>
+> <usage><subagent_tokens>49057</subagent_tokens><tool_uses>11</tool_uses><duration_ms>136661</duration_ms></usage>
+> </task-notification>
+
+*Outcome:* no change (background exploration result: the CheapShark api layer).
+
+**Prompt 28** · 17:10
+> <task-notification>
+> <task-id>a1836fcc512c062ff</task-id>
+> <tool-use-id>toolu_01D9c48Y18f63NTJs8175ddU</tool-use-id>
+> <output-file>/tmp/claude-1000/-home-kreten-code-deal-buster/43b95d18-6ed2-4222-b918-a5ee5f30648a/tasks/a1836fcc512c062ff.output</output-file>
+> <status>completed</status>
+> <summary>Agent "Explore worker state and config" finished</summary>
+> <note>A task-notification fires each time this agent stops with no live background children of its own. The user can send it another message and resume it, so the same task-id may notify more than once.</note>
+> <result>Exploration complete. Findings below.
+> 
+> ---
+> 
+> ## 1. `/home/kreten/code/deal_buster/worker/state.ts` (191 lines)
+> 
+> Version constants:
+> 
+> ```ts
+> export const GAME_TAGS_VERSION = 2;
+> export const DEAL_SCOUT_STATE_VERSION = 2;
+> ```
+> 
+> `Watch` — note `lastNotifiedPrice` is **already reserved for `PriceCheckWorkflow` by name** in the doc comment:
+> 
+> ```ts
+> export interface Watch {
+>   /** CheapShark's stable game id. The dedupe key: one watch per gameID. */
+>   gameID: string;
+>   steamAppID?: string;
+>   title: string;
+>   targetPrice: number;   // alert when salePrice &lt;= this, USD
+>   addedAt: string;       // ISO
+>   /**
+>    * The price the last alert for this watch quoted. Written by PriceCheckWorkflow
+>    * so it does not alert twice for the same drop; never set when a watch is created.
+>    */
+>   lastNotifiedPrice?: number;
+> }
+> 
+> export interface ShownDeal {
+>   gameID: string;
+>   steamAppID?: string;
+>   title: string;
+>   salePrice: number;
+> }
+> ```
+> 
+> `DealScoutState` and its initial value:
+> 
+> ```ts
+> export interface DealScoutState {
+>   version?: number;
+>   watches: Watch[];
+>   preferences: Preference[];
+>   lastShownDeals: ShownDeal[];
+>   gameTags: Record&lt;string, CachedGameTags&gt;;   // keyed by Steam appID
+>   prefs: { maxPrice: number | null; alertsEnabled: boolean };
+>   lastPriceCheckAt: string | null;
+> }
+> 
+> export const initialDealScoutState: DealScoutState = {
+>   version: DEAL_SCOUT_STATE_VERSION,
+>   watches: [], preferences: [], lastShownDeals: [], gameTags: {},
+>   prefs: { maxPrice: null, alertsEnabled: true },
+>   lastPriceCheckAt: null
+> };
+> ```
+> 
+> Two fields exist for the workflow but are **unused today**: `prefs.alertsEnabled` and `lastPriceCheckAt` (grep: no reads/writes anywhere outside `state.ts`).
+> 
+> `migrateDealScoutState(state): DealScoutState | null` — returns `null` when `state.version === DEAL_SCOUT_STATE_VERSION` so the caller can skip a pointless write; otherwise renames v1 `threshold` → `targetPrice`, normalizes `steamAppID: null` → absent, and backfills `preferences`/`lastShownDeals`/`gameTags`. Deliberately field-by-field, not a spread over `initialState`. **If you add a state field for the workflow, bump `DEAL_SCOUT_STATE_VERSION` to 3 and add a branch here** — `initialState` is not re-applied to existing instances.
+> 
+> `WatchStore` — the only contract the workflow would need for writes if you reuse it:
+> 
+> ```ts
+> export interface WatchStore {
+>   watches(): Watch[];
+>   saveWatches(next: Watch[]): void;
+>   lastShownDeals(): ShownDeal[];
+> }
+> ```
+> 
+> Also: `type LoadGameTags`, `type RecordShownDeals = (deals: ShownDeal[]) =&gt; void`.
+> 
+> ## 2. `/home/kreten/code/deal_buster/worker/server.ts` (472 lines)
+> 
+> ```ts
+> export class DealScout extends AIChatAgent&lt;Env, DealScoutState&gt; {
+>   initialState = initialDealScoutState;
+>   maxPersistedMessages = 100;
+>   chatRecovery = true;
+>   waitForMcpConnections = true;
+> ```
+> 
+> `AIChatAgent` comes from `@cloudflare/ai-chat` (0.9.3), not `agents/ai-chat-agent`. `callable`, `routeAgentRequest`, `Schedule` come from `"agents"`.
+> 
+> `@callable()` methods (only three, all thin): `ping(message)` (line 70), `addServer(name, url)` (79), `removeServer(serverId)` (84).
+> 
+> `onStart()` (46) calls `this.migrateState()` then `this.dropStaleGameTags()`, then configures MCP OAuth.
+> 
+> **Established pattern (b) — writing state outside a chat turn**: always a full-object spread of `this.state`, never partial:
+> 
+> ```ts
+> this.setState({ ...this.state, watches: next });        // watchStore.saveWatches, 112
+> this.setState({ ...this.state, lastShownDeals: deals }); // 119
+> this.setState({ ...this.state, gameTags: fresh });       // 139
+> ```
+> 
+> Reads always go through `this.state` on each call (never captured once) and always defensively defaulted (`this.state.watches ?? []`) because an old instance may lack a key.
+> 
+> **Established pattern (a) — pushing to WebSocket clients** — `executeTask`, lines 447-462, verbatim:
+> 
+> ```ts
+> async executeTask(description: string, _task: Schedule&lt;string&gt;) {
+>   console.log(`Executing scheduled task: ${description}`);
+> 
+>   // Notify connected clients via a broadcast event.
+>   // We use broadcast() instead of saveMessages() to avoid injecting
+>   // into chat history — that would cause the AI to see the notification
+>   // as new context and potentially loop.
+>   this.broadcast(
+>     JSON.stringify({
+>       type: "scheduled-task",
+>       description,
+>       timestamp: new Date().toISOString()
+>     })
+>   );
+> }
+> ```
+> 
+> So: a JSON-stringified `{ type, ...payload, timestamp }` frame via `this.broadcast(...)`, deliberately **not** `saveMessages`. A `PriceCheckWorkflow` alert should follow the same shape with a new `type` (e.g. `"price-alert"`).
+> 
+> Consumers of that frame already exist and both ignore unknown `type`s, so a new type is additive:
+> - `/home/kreten/code/deal_buster/worker/web/app.tsx:295-311` — `onMessage` parses JSON, `if (data.type === "scheduled-task")` → Kumo toast.
+> - `/home/kreten/code/deal_buster/src/hooks/useDealScout.ts:202-215` — `handleFrame` drops anything whose `type !== CHAT_RESPONSE` with a debug log that explicitly names the scheduled-task broadcast.
+> 
+> `this.schedule` is used once, inside the `scheduleTask` AI tool (line 344): `this.schedule(input, "executeTask", description, { idempotent: true })`, where `input` is a `Date` | delay seconds | cron string. `this.getSchedules()` / `this.cancelSchedule(taskId)` back the other two scheduling tools. **There is no `every 24h` cron registered anywhere today** — nothing calls `schedule` outside that model-driven tool, so the recurring price check has no trigger yet.
+> 
+> `onChatMessage` (198) is non-streaming on purpose (`generateText`, retried once), prunes **all** tool calls out of history, `stopWhen: stepCountIs(8)`, and only uses `this.env.AI`.
+> 
+> Default export: `{ async fetch(request, env) { return (await routeAgentRequest(request, env)) || new Response("Not found", {status:404}); } } satisfies ExportedHandler&lt;Env&gt;`.
+> 
+> ## 3. `Env` and `wrangler.jsonc`
+> 
+> `/home/kreten/code/deal_buster/worker/env.d.ts` is 15,790 lines, generated. Header + the whole `Env` surface:
+> 
+> ```ts
+> /* eslint-disable */
+> // Generated by Wrangler by running `wrangler types worker/env.d.ts` (hash: 98a30dc79543b387e55b5d80c241bbed)
+> // Runtime types generated with workerd@1.20260925.1 2026-06-11 nodejs_compat
+> interface __BaseEnv_Env {
+> 	AI: Ai;
+> 	DealScout: DurableObjectNamespace&lt;import("./server").DealScout&gt;;
+> }
+> declare namespace Cloudflare {
+> 	interface GlobalProps {
+> 		mainModule: typeof import("./server");
+> 		durableNamespaces: "DealScout";
+> 	}
+> 	interface Env extends __BaseEnv_Env {}
+> }
+> interface Env extends __BaseEnv_Env {}
+> ```
+> 
+> Only **two** bindings: `AI` and `DealScout`. `RESEND_API_KEY` / `NOTIFY_EMAIL` are **not** in `Env` (they live only in `.dev.vars`, see §6) — they will not typecheck until regenerated, and `wrangler types` only emits vars it can see in config, so secrets typically need a `"vars"` stub in `wrangler.jsonc` or a hand-written `declare` augmentation. Regenerate with `bun run agent:types` (= `wrangler types worker/env.d.ts`).
+> 
+> `/home/kreten/code/deal_buster/wrangler.jsonc` in full:
+> 
+> ```jsonc
+> {
+>   "$schema": "node_modules/wrangler/config-schema.json",
+>   "name": "deal-buster-agent",
+>   "main": "worker/server.ts",
+>   "compatibility_date": "2026-06-11",
+>   "compatibility_flags": ["nodejs_compat"],
+>   "ai": { "binding": "AI", "remote": true },
+>   "assets": {
+>     "directory": "./public",
+>     "not_found_handling": "single-page-application",
+>     "run_worker_first": ["/agents/*", "/oauth/*"]
+>   },
+>   "durable_objects": {
+>     "bindings": [{ "class_name": "DealScout", "name": "DealScout" }]
+>   },
+>   "migrations": [{ "new_sqlite_classes": ["DealScout"], "tag": "v1" }]
+> }
+> ```
+> 
+> **No `workflows` binding, no Workflow class, no `vars`, no `triggers`/crons.** You will need to add a `"workflows": [{ "name": ..., "binding": "PRICE_CHECK_WORKFLOW", "class_name": "PriceCheckWorkflow" }]` entry and export the class from `worker/server.ts` (the single `main`), then re-run `wrangler types`. Note the DO binding name is `DealScout` (PascalCase), matching the class name — `runWorkflow`'s `agentBinding` auto-detection keys off `constructor.name`, so that already lines up.
+> 
+> ## 4. Workflow API surface available
+> 
+> `agents@0.17.4` (`node_modules/agents/package.json`). It **does** ship Workflow helpers — export subpath `"./workflows"` → `/home/kreten/code/deal_buster/node_modules/agents/dist/workflows.d.ts`, which itself does `import { WorkflowEntrypoint, WorkflowEvent } from "cloudflare:workers"`.
+> 
+> So two viable bases:
+> 
+> **(a) Raw Cloudflare** — `import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep } from "cloudflare:workers";` (types are in `worker/env.d.ts` under `declare module 'cloudflare:workers'`, lines ~13952-14075):
+> 
+> ```ts
+> export abstract class WorkflowEntrypoint&lt;Env = unknown, T extends Rpc.Serializable&lt;T&gt; | unknown = unknown&gt; implements Rpc.WorkflowEntrypointBranded {
+>     protected ctx: ExecutionContext;
+>     protected env: Env;
+>     constructor(ctx: ExecutionContext, env: Env);
+>     run(event: Readonly&lt;WorkflowEvent&lt;T&gt;&gt;, step: WorkflowStep): Promise&lt;unknown&gt;;
+> }
+> 
+> export type WorkflowEvent&lt;T&gt; = {
+>     payload: Readonly&lt;T&gt;;
+>     timestamp: Date;
+>     instanceId: string;
+>     workflowName: string;
+>     schedule?: WorkflowCronSchedule;   // { cron: string; scheduledTime: number }
+> };
+> ```
+> 
+> `step.do` has four overloads (ordering is load-bearing per the comment in the file):
+> 
+> ```ts
+> export abstract class WorkflowStep {
+>     do&lt;T extends Rpc.Serializable&lt;T&gt;&gt;(name: string, callback: (ctx: WorkflowStepContext) =&gt; Promise&lt;T&gt;, rollbackOptions?: WorkflowStepRollbackOptions&lt;T&gt;): Promise&lt;T&gt;;
+>     do&lt;T extends Rpc.Serializable&lt;T&gt;&gt;(name: string, config: WorkflowStepConfigWithDelayFunction, callback: (ctx: WorkflowStepContext&lt;WorkflowDelayFunction&gt;) =&gt; Promise&lt;T&gt;, rollbackOptions?: ...): Promise&lt;T&gt;;
+>     do&lt;T extends Rpc.Serializable&lt;T&gt;&gt;(name: string, config: WorkflowStepConfigWithStaticDelay, callback: (ctx: WorkflowStepContext&lt;WorkflowDelayDuration | number&gt;) =&gt; Promise&lt;T&gt;, rollbackOptions?: ...): Promise&lt;T&gt;;
+>     do&lt;T extends Rpc.Serializable&lt;T&gt;&gt;(name: string, config: WorkflowStepConfig, callback: (ctx: WorkflowStepContext) =&gt; Promise&lt;T&gt;, rollbackOptions?: ...): Promise&lt;T&gt;;
+>     sleep: (name: string, duration: WorkflowSleepDuration) =&gt; Promise&lt;void&gt;;
+>     sleepUntil: (name: string, timestamp: Date | number) =&gt; Promise&lt;void&gt;;
+>     waitForEvent&lt;T extends Rpc.Serializable&lt;T&gt;&gt;(name: string, options: { type: string; timeout?: WorkflowTimeoutDuration | number }): Promise&lt;WorkflowStepEvent&lt;T&gt;&gt;;
+> }
+> ```
+> 
+> Retry/timeout config:
+> 
+> ```ts
+> export type WorkflowStepConfig = {
+>     retries?: {
+>         limit: number;
+>         delay: WorkflowDelayDuration | number | WorkflowDelayFunction;
+>         backoff?: WorkflowBackoff;            // 'constant' | 'linear' | 'exponential'
+>     };
+>     timeout?: WorkflowTimeoutDuration | number;
+>     sensitive?: WorkflowStepSensitivity;      // 'output' — redacts step output
+> };
+> export type WorkflowSleepDuration = `${number} ${WorkflowDurationLabel}${'s' | ''}` | number;
+> // WorkflowDurationLabel = 'second' | 'minute' | 'hour' | 'day' | 'week' | 'month' | 'year'
+> ```
+> 
+> The callback receives `ctx: WorkflowStepContext` = `{ step: { name, count }, attempt, config: {...} }`. Optional 4th arg `{ rollback, rollbackConfig }` for compensation. Note `T extends Rpc.Serializable&lt;T&gt;` — step return values must be JSON/RPC-serializable, so a `Watch[]` is fine.
+> 
+> The binding type (`env.PRICE_CHECK_WORKFLOW`) is `Workflow&lt;PARAMS&gt;` with `get(id)`, `create(options?)`, `createBatch(...)`, `deleteBatch(...)`.
+> 
+> **(b) `AgentWorkflow` from `agents/workflows`** — purpose-built for exactly this design:
+> 
+> ```ts
+> declare class AgentWorkflow&lt;AgentType extends Agent = Agent, Params = unknown, ProgressType = DefaultProgress, Env extends Cloudflare.Env = Cloudflare.Env&gt;
+>   extends WorkflowEntrypoint&lt;Env, AgentWorkflowParams&lt;Params&gt;&gt; {
+>   get agent(): DurableObjectStub&lt;AgentType&gt;;   // typed RPC back to the DO
+>   get workflowId(): string;
+>   get workflowName(): string;
+>   protected notifyAgent(callback: WorkflowCallback): Promise&lt;void&gt;;
+>   protected reportProgress(progress: ProgressType): Promise&lt;void&gt;;
+>   protected broadcastToClients(message: unknown): void;   // non-durable, may repeat on retry
+>   protected waitForApproval&lt;T&gt;(step: AgentWorkflowStep, options?): Promise&lt;T&gt;;
+>   protected extendStep(step: AgentWorkflowStep, _event): AgentWorkflowStep;
+> }
+> ```
+> 
+> Its `step` is an `AgentWorkflowStep extends WorkflowStep` with **durable, idempotent** agent-comm methods — directly relevant to your step 5 (write back to the DO):
+> 
+> ```ts
+> interface AgentWorkflowStep extends WorkflowStep {
+>   reportComplete&lt;T&gt;(result?: T): Promise&lt;void&gt;;
+>   reportError(error: Error | string): Promise&lt;void&gt;;
+>   sendEvent&lt;T&gt;(event: T): Promise&lt;void&gt;;
+>   updateAgentState(state: unknown): Promise&lt;void&gt;;                     // replaces + broadcasts
+>   mergeAgentState(partialState: Record&lt;string, unknown&gt;): Promise&lt;void&gt;; // shallow merge + broadcasts
+>   resetAgentState(): Promise&lt;void&gt;;
+> }
+> ```
+> 
+> Triggered from the agent side via `this.runWorkflow&lt;P&gt;(workflowName: WorkflowName&lt;Env&gt;, params: P, options?: RunWorkflowOptions): Promise&lt;string&gt;` (`node_modules/agents/dist/agent-tool-types-OhWqAbCp.d.ts:4380`), with `RunWorkflowOptions = { id?, metadata?, agentBinding? }`. It injects `__agentName` / `__agentBinding` / `__workflowName` into params (`AgentWorkflowParams&lt;T&gt; = T &amp; AgentWorkflowInternalParams`) and tracks the run in a `cf_agents_workflows` table. Also available: `sendWorkflowEvent`, `getWorkflows`, `getWorkflowById`, terminate/pause/resume/restart, and `onWorkflowProgress` / `onWorkflowComplete` / `onWorkflowError` / `onWorkflowEvent` hooks on the Agent. Caveats it documents: callbacks re-resolve via `getAgentByName` (fine — you address by name `"deal-scout"`), and class names must survive bundling.
+> 
+> Caveat for path (b): `AgentWorkflow` is typed `AgentType extends Agent`, and `DealScout` extends `AIChatAgent` from `@cloudflare/ai-chat` — worth a typecheck before committing to it. `mergeAgentState` is a shallow merge, which is compatible with the codebase's existing full-spread convention but would clobber `watches` wholesale (that's actually what you want for a `lastNotifiedPrice` update).
+> 
+> ## 5. Watch tools
+> 
+> - `/home/kreten/code/deal_buster/worker/tools/addWatch.ts` — one game per call (Llama 3.3 can't do parallel tool calls). Resolves via `resolveShownDeal(store.lastShownDeals(), ref)`; a `position` that misses is refused rather than falling back to a live search; a title/steamAppID miss falls back to `lookupDeal` → `searchDeals({ title|steamAppID, limit: 1 })`. `targetPrice = ref.targetPrice ?? deal.salePrice`. `gameID` is the dedupe key: re-watching updates in place, keeping the original `addedAt`.
+> - `/home/kreten/code/deal_buster/worker/tools/listWatches.ts` — projects each watch to `{ position, title, targetPrice, addedAt, gameID, steamAppID? }`. **Does not expose `lastNotifiedPrice`** — consider whether the model should see it.
+> - `/home/kreten/code/deal_buster/worker/tools/removeWatch.ts` — filters by `gameID`.
+> - `/home/kreten/code/deal_buster/worker/tools/gameRefs.ts` — pure, DO-free helpers: `positionIndex`, `findByTitle` (exact-normalized pass then substring, so "Hades" doesn't grab "Hades II"), `resolveShownDeal`, `resolveWatch`, `isEmptyRef`.
+> 
+> **`lastNotifiedPrice` is never written today.** The only three references are the type declaration (`state.ts:25`), the migration note (`state.ts:68`), and a comment in `addWatch.ts:138` explaining it is *deliberately dropped* on update:
+> 
+> ```ts
+> // `addedAt` is when the user first asked for this game, so it is kept.
+> // `lastNotifiedPrice` is dropped: it described the old target price.
+> stored = { ...watch, addedAt: watches[existing]!.addedAt };
+> ```
+> 
+> Plus a test asserting its absence (`tests/watchTools.test.ts:92`): `expect(current()[0]).not.toHaveProperty("lastNotifiedPrice")`. The workflow will be the first and only writer.
+> 
+> ## 6. Secrets / env access
+> 
+> Today the worker touches env exactly **once**: `worker/server.ts:200`, `createWorkersAI({ binding: this.env.AI })`. No `process.env` in worker code, no `secret_store`, no `vars` block in `wrangler.jsonc`.
+> 
+> But the secrets already exist locally. `/home/kreten/code/deal_buster/.dev.vars` (gitignored, twice, and its last commit `03fe300` is titled ".dev.vars file ignored 'resend api key' config") holds exactly:
+> 
+> ```
+> RESEND_API_KEY=&lt;redacted&gt;
+> NOTIFY_EMAIL=&lt;redacted&gt;
+> ```
+> 
+> Neither is referenced by any code yet, and neither appears in `Env`. `CLAUDE.md` pre-plans them (lines 135, 146-147):
+> 
+> ```
+> └─ step: send email to env.NOTIFY_EMAIL
+> - **Email** — `send_email` binding (needs domain on Cloudflare + Email Routing, verified destination) OR Resend via fetch. TBD.
+> - **Secrets** — `NOTIFY_EMAIL` (and `RESEND_API_KEY` if used) via `wrangler secret put`; never stored in agent state
+> ```
+> 
+> `PROMPTS.md` lines 317-331 contain the design intent already written down, including the exact params shape you're about to build (`{ agentName: string; watches: Watch[] }`), "keep the workflow fed by params rather than reaching into the DO for reads; it calls back to the agent only to write", and "send an email via Resend". The `ai-chat` template's `cloudflare:email` types are present in `env.d.ts` but no `send_email` binding is configured.
+> 
+> ## 7. Test conventions and the two tsconfigs
+> 
+> `bun test` (`package.json`) picks up `*.test.ts` only; `*.manual.ts` and bare `chat.ts` / `clear-history.ts` are run by hand (`bun tests/watch.manual.ts`).
+> 
+> **Unit-level, no server** — import worker modules directly by relative path and hand-roll the deps:
+> - `tests/watchTools.test.ts` — imports the three watch tool factories + `gameRefs` + `migrateDealScoutState`, and builds an in-memory `WatchStore` (`makeStore`). Invokes tools through a helper `run(t, input)` with `const CALL_CONTEXT = { toolCallId: "test", messages: [] } as never`. **This is the template for testing `PriceCheckWorkflow` logic** — extract the compare/qualify logic into a pure function so it can be tested without a `WorkflowStep`.
+> - `tests/tools.test.ts` (searchDeals/getGameDetails, fakes `LoadGameTags`), `tests/steamAppId.test.ts`, `tests/searchDealsQuery.test.ts`, `tests/titles.test.ts`.
+> 
+> **Live against `wrangler dev`** — `tests/agent.smoke.test.ts` uses `new AgentClient({ host: process.env.AGENT_HOST ?? "localhost:8787", agent: "deal-scout", name: "deal-scout" })` and `client.call("ping", [...])`; requires `bunx wrangler dev` running first. Same for `tests/chat.ts`, `tests/clear-history.ts`, `tests/watch.manual.ts`. No `vitest`, no `@cloudflare/vitest-pool-workers` — so there is **no in-process harness for a real `WorkflowEntrypoint`**; end-to-end will be a `wrangler dev` manual script, likely a `@callable()` trigger you invoke over `AgentClient`.
+> 
+> The tsconfigs are deliberately split so workerd globals don't collide with Bun's:
+> 
+> - `tsconfig.json` — Bun/OpenTUI TUI. `"types": ["bun"]`, `jsxImportSource: "@opentui/react"`. Includes `index.tsx`, `src/**/*.ts(x)`, **`tests/**/*.ts`**. So every test file is typechecked under the *Bun* project, not the worker one — a test importing `worker/tools/*` works because those modules are isomorphic (`fetch`/`zod`/`ai` only). **A test that imported a `cloudflare:workers` symbol would fail `bun run typecheck`.** Notable strict flags: `noUncheckedIndexedAccess: true`, `noImplicitOverride: true`, `verbatimModuleSyntax: true`.
+> - `tsconfig.worker.json` — `"extends": "agents/tsconfig"`, `"types": ["node", "vite/client"]` (runtime types come from `worker/env.d.ts`, *not* `@cloudflare/workers-types` — that package is not installed; grep confirms `node_modules/@cloudflare/workers-types` is absent). Includes `worker/**/*.ts(x)`, `worker/env.d.ts`, `src/api/**`, `src/types/**`, `src/mapGameDetails.ts`, `vite.config.ts`. A new `worker/priceCheckWorkflow.ts` is picked up automatically.
+> 
+> `bun run typecheck` runs both projects.</result>
+> <usage><subagent_tokens>69633</subagent_tokens><tool_uses>19</tool_uses><duration_ms>165353</duration_ms></usage>
+> </task-notification>
+
+*Outcome:* no change (background exploration result: worker state, config and the Workflow API surface).
+
+**Prompt 29** · 17:12
+> Resend email: POST https://api.resend.com/emails with Authorization: Bearer ${env.RESEND_API_KEY}, to: env.NOTIFY_EMAIL, a from of onboarding@resend.dev (Resend's test sender, which delivers to the account owner's own verified email without a domain — leave a comment noting this is the no-domain path), subject like "💰 Price drop: <title>", and both text and html bodies. One email summarizing all drops in a run is fine (fewer sends); because i hate to spam others
+> 
+> Triggers:
+> 
+> Scheduled: the DealScout agent's existing schedule() (every 24h) creates a workflow instance, passing its own instance name + current watches.
+> Manual (as a side door): add a dev route (e.g. POST /dev/price-check) on the Worker that creates a workflow instance immediately. Guard it minimally (dev-only / simple token); leave a comment that it's for demos. 
+> 
+> Config: add the Workflow binding to wrangler.jsonc (workflows entry: binding, name, class_name), ensure the workflow has the AI binding, and declare RESEND_API_KEY + NOTIFY_EMAIL as secrets (read from env, never hardcoded).
+> 
+> Constraints:
+> 
+> Steps must be idempotent-ish and retry-safe: fetching a price twice is fine; sending an email twice is not — do the lastNotifiedPrice update in the same logical step as the send so a retry after a successful send doesn't double-notify.
+> Don't break existing tools/state; additive only.
+> 
+> Tests: unit-test the compare/dedupe logic (drop below target alerts; same price twice doesn't; above target doesn't) with mocked prices. Run bun test + worker typecheck.
+> 
+> Verify then stop: locally (wrangler dev) — add a watch with a target at or above the current price, hit POST /dev/price-check, and confirm: an alert appears in the chat AND an email is attempted (log the Resend response). Then hit it again and confirm the dedupe suppresses a repeat. Commit when green.
+
+*Outcome:* added worker/priceCheckWorkflow.ts, worker/priceCheck.ts (pure qualifyDrops + alert rendering) and worker/resend.ts, getCurrentPrice in src/api/cheapshark.ts, and the trigger/claim/broadcast side in worker/server.ts plus the PRICE_CHECK_WORKFLOW binding; alerts render in the TUI and web clients; folded the state write and the email into one claim-first step per the retry constraint, and deviated from the spec on dedupe (new lows only) — verified live against wrangler dev, 52 tests pass (commit 476fd5c).
