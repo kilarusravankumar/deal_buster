@@ -715,7 +715,7 @@ function Chat() {
                     "Best deals under $10",
                     "Any deals on Hades?",
                     "Well-reviewed RPGs under $20",
-                    "Watch Baldur's Gate 3 and alert me under $30",
+                    "Watch witcher3 and alert me under $30",
                     "What am I watching?"
                   ].map((prompt) => (
                     <Button

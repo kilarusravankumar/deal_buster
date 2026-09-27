@@ -198,6 +198,7 @@ export default function App() {
       >
         <ChatPane
           messages={chat.messages}
+          target={chat.target}
           status={chat.status}
           statusDetail={chat.statusDetail}
           busy={chat.busy}

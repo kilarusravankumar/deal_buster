@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from "react"
 import { useKeyboard } from "@opentui/react"
 import type { InputRenderable, ScrollBoxRenderable } from "@opentui/core"
 import type { ChatMessage, ConnectionStatus, DealSet, PaneFocus } from "../types/chat"
+import { shortTargetLabel, type AgentTarget } from "../util/agentTarget"
 import { setTextCapture } from "../util/keyCapture"
 import ChatDealCards, { chatCardId } from "./ChatDealCards"
 
 interface ChatPaneProps {
   messages: ChatMessage[],
+  /** The resolved agent endpoint, shown only when it is not the default. */
+  target: AgentTarget | null,
   status: ConnectionStatus,
   statusDetail: string | null,
   busy: boolean,
@@ -37,6 +40,7 @@ function latestDealSet(messages: ChatMessage[]): DealSet | null {
 
 export default function ChatPane({
   messages,
+  target,
   status,
   statusDetail,
   busy,
@@ -145,7 +149,17 @@ export default function ChatPane({
   }
 
   const label = STATUS_LABEL[status]
-  const title = ` Deal Scout — ${label.text}${busy ? " · thinking…" : ""} `
+  // The deployed agent is the default and needs no announcement; anything else
+  // does, or a session pointed at localhost looks identical to a prod one.
+  const tag = target == null || target.source === "default" ? null : shortTargetLabel(target)
+  const busySuffix = busy ? " · thinking…" : ""
+  const base = ` Deal Scout — ${label.text}${busySuffix} `
+  const tagged = tag == null ? base : ` Deal Scout — ${label.text} · ${tag}${busySuffix} `
+  // A title wider than the box is not truncated by the renderer — it is dropped
+  // outright, taking the connection status with it. So the endpoint tag, the
+  // least important part, is what gives way when there is no room.
+  const titleRoom = (typeof width === "number" ? width : 120) - 2
+  const title = tagged.length <= titleRoom ? tagged : base
 
   return (
     <box style={{ width, height: "100%", flexDirection: "column" }}>

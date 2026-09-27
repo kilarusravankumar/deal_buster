@@ -6,6 +6,11 @@ import App from "../src/App"
 import { getCurrentPrice, searchDeals } from "../src/api/cheapshark"
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+// The TUI now defaults to the DEPLOYED agent, so this test — which drives the
+// real App against a local `wrangler dev` — has to say so. Set before render,
+// not at import time: useDealScout resolves the endpoint when it mounts.
+process.env.DEAL_BUSTER_AGENT_URL ??= "ws://localhost:8787/agents/deal-scout/deal-scout"
+
 const { flush, captureCharFrame } = await testRender(React.createElement(App), { width: 120, height: 46 })
 const chat = (f: string) => f.split("\n").map((l) => l.slice(0, 42)).join("\n")
 

@@ -7,6 +7,11 @@ import { testRender } from "@opentui/react/test-utils"
 import React from "react"
 import App from "../src/App"
 
+// The TUI now defaults to the DEPLOYED agent, so this test — which drives the
+// real App against a local `wrangler dev` — has to say so. Set before render,
+// not at import time: useDealScout resolves the endpoint when it mounts.
+process.env.DEAL_BUSTER_AGENT_URL ??= "ws://localhost:8787/agents/deal-scout/deal-scout"
+
 const setup = await testRender(React.createElement(App), { width: 120, height: 46 })
 const { mockInput, flush, captureCharFrame } = setup
 

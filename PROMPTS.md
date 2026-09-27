@@ -917,3 +917,29 @@ Every prompt sent to Claude Code while building this project, captured automatic
 > 3, Rebrand the header: change the title from "Agent Starter / AI Chat" to Deal Buster.
 
 *Outcome:* set the dark default in index.html's inline script (before first paint, localStorage still overrides), rebranded the header to Deal Buster / Deal Scout, and swapped the four starter prompts for five that each hit a real tool; deployed and verified the live page serves dark-by-default with the new prompts, after an edge-cache HIT briefly served the old bundle.
+
+**Prompt 32** · 18:40
+> Make the TUI connect to the deployed Cloudflare agent by default, with a local override — it currently points at localhost
+> 
+> Default agent URL = the prod endpoint: wss://deal-buster-agent.kilarusravankumar.workers.dev/agents/deal-scout/deal-scout
+> Override for local dev: an env var (e.g. DEAL_BUSTER_AGENT_URL) and/or a --local flag that points at ws://localhost:8787/agents/deal-scout/deal-scout
+> Bake the prod default into the bun build --compile binary so a downloaded binary connects to prod with zero config
+> Keep the existing chat pane, streamed replies, and GameCard rendering intact
+
+**Prompt 33** · 18:48
+> <task-notification>
+> <task-id>bwpgbmaod</task-id>
+> <tool-use-id>toolu_01U1VxveC3G27KPtH1xTcxmQ</tool-use-id>
+> <output-file>/tmp/claude-1000/-home-kreten-code-deal-buster/43b95d18-6ed2-4222-b918-a5ee5f30648a/tasks/bwpgbmaod.output</output-file>
+> <status>completed</status>
+> <summary>Background command "Verify local flag and env overrides" completed (exit code 0)</summary>
+> </task-notification>
+
+**Prompt 34** · 18:51
+> <task-notification>
+> <task-id>bzgir1jzg</task-id>
+> <tool-use-id>toolu_01A2NiXAAeeb73b2HDieCSYp</tool-use-id>
+> <output-file>/tmp/claude-1000/-home-kreten-code-deal-buster/43b95d18-6ed2-4222-b918-a5ee5f30648a/tasks/bzgir1jzg.output</output-file>
+> <status>completed</status>
+> <summary>Background command "Run full headless TUI regression" completed (exit code 0)</summary>
+> </task-notification>

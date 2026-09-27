@@ -3,11 +3,12 @@ import { AgentClient } from "agents/client"
 import type { Deal } from "../api/cheapshark"
 import type { ChatMessage, ConnectionStatus, DealSet } from "../types/chat"
 import { dlog, truncate } from "../util/debug"
+import { AGENT, resolveAgentTarget, type AgentTarget } from "../util/agentTarget"
 
-// The same host, agent and instance name tests/chat.ts connects to: one shared
-// agent, no per-user identity. `AGENT_HOST` is how a deployed URL gets baked in.
-const AGENT_HOST = process.env.AGENT_HOST ?? "localhost:8787"
-const AGENT = "deal-scout"
+// The endpoint is resolved per mount rather than at module load, so a caller can
+// set DEAL_BUSTER_AGENT_URL before rendering (the headless manual tests do) and
+// still be heard. See ../util/agentTarget for the precedence rules; the default
+// is the deployed Worker.
 
 // Frame types from the agents chat protocol. Only these two matter to us.
 const CHAT_REQUEST = "cf_agent_use_chat_request"
@@ -72,6 +73,8 @@ function describeToolCall(toolName: string, input: unknown): string {
 
 export interface DealScoutChat {
   messages: ChatMessage[]
+  /** The resolved endpoint, or null until the first connect attempt. */
+  target: AgentTarget | null
   status: ConnectionStatus
   /** Human-readable detail for a non-connected status, e.g. a close reason. */
   statusDetail: string | null
@@ -103,6 +106,8 @@ export default function useDealScout(): DealScoutChat {
   const [messages, setMessages] = useState<ChatMessage[]>(initial)
   const [status, setStatus] = useState<ConnectionStatus>("connecting")
   const [statusDetail, setStatusDetail] = useState<string | null>(null)
+  // Which endpoint this session is talking to, for the pane's title.
+  const [target, setTarget] = useState<AgentTarget | null>(null)
 
   const clientRef = useRef<AgentClient | null>(null)
   // The turn frames are currently being routed to, or null between turns.
@@ -279,11 +284,21 @@ export default function useDealScout(): DealScoutChat {
 
   useEffect(() => {
     let client: AgentClient
-    dlog("ws", `connecting host=${AGENT_HOST} agent=${AGENT} name=${AGENT}`)
+    let resolved: AgentTarget
     try {
-      client = new AgentClient({ host: AGENT_HOST, agent: AGENT, name: AGENT })
+      // A bad --agent-url or DEAL_BUSTER_AGENT_URL throws here rather than
+      // falling back to production, which would be a confusing way to "work".
+      resolved = resolveAgentTarget(Bun.argv.slice(2), process.env)
+      dlog("ws", `connecting ${resolved.url} (from ${resolved.source})`)
+      setTarget(resolved)
+      client = new AgentClient({
+        host: resolved.host,
+        protocol: resolved.protocol,
+        agent: AGENT,
+        name: AGENT
+      })
     } catch (error) {
-      dlog("ws", "constructor threw:", error instanceof Error ? error.message : String(error))
+      dlog("ws", "could not start a client:", error instanceof Error ? error.message : String(error))
       setStatus("error")
       setStatusDetail(error instanceof Error ? error.message : String(error))
       return
@@ -318,7 +333,7 @@ export default function useDealScout(): DealScoutChat {
     const onError = (event: Event) => {
       dlog("ws", "error event:", truncate((event as ErrorEvent).message ?? event.type, 200))
       setStatus("error")
-      setStatusDetail(`cannot reach the agent at ${AGENT_HOST}`)
+      setStatusDetail(`cannot reach the agent at ${resolved.url}`)
       failTurn("the connection failed before the agent replied")
     }
     const onMessage = (event: Event) => handleFrame((event as MessageEvent).data)
@@ -434,5 +449,5 @@ export default function useDealScout(): DealScoutChat {
 
   const busy = messages.some((message) => message.pending)
 
-  return { messages, status, statusDetail, busy, send, retry }
+  return { messages, target, status, statusDetail, busy, send, retry }
 }
