@@ -8,10 +8,16 @@ import { tool } from "ai";
 import { z } from "zod";
 import { searchDeals } from "../../src/api/cheapshark";
 import { SORT_OPTIONS } from "../../src/types/sort";
+import type { RecordShownDeals } from "../state";
 
 export interface SearchDealsToolDeps {
   /** `prefs.maxPrice` from agent state: the ceiling to apply when none is named. */
   defaultMaxPrice: number | null;
+  /**
+   * Snapshots the result into agent state so a later turn can resolve "watch the
+   * second one" — chat history, tool results included, is pruned between turns.
+   */
+  recordShownDeals: RecordShownDeals;
 }
 
 /**
@@ -19,7 +25,10 @@ export interface SearchDealsToolDeps {
  * by Llama 3.3 — a small model picks filters far more reliably from "'under $20'
  * → 20" than from a bare type.
  */
-export function searchDealsTool({ defaultMaxPrice }: SearchDealsToolDeps) {
+export function searchDealsTool({
+  defaultMaxPrice,
+  recordShownDeals
+}: SearchDealsToolDeps) {
   return tool({
     description:
       "Search current Steam deals on CheapShark. Use for 'what's on sale', for a named game's current price, or when the user gives a budget.",
@@ -123,6 +132,19 @@ export function searchDealsTool({ defaultMaxPrice }: SearchDealsToolDeps) {
             deals,
             note: `no deal indexed under steamAppID ${filters.steamAppID} — CheapShark indexes its own appID, which can differ from Steam's. Search by title instead.`
           };
+        }
+        // Only a non-empty result replaces the snapshot. A follow-up search that
+        // finds nothing must not erase the list the user is actually looking at,
+        // or "watch the second one" would break right after a fruitless query.
+        if (deals.length > 0) {
+          recordShownDeals(
+            deals.map((deal) => ({
+              gameID: deal.gameID,
+              title: deal.title,
+              salePrice: deal.salePrice,
+              ...(deal.steamAppID ? { steamAppID: deal.steamAppID } : {})
+            }))
+          );
         }
         return { count: deals.length, deals };
       } catch (error) {

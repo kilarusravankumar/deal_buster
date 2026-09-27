@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AgentClient } from "agents/client"
 import type { Deal } from "../api/cheapshark"
 import type { ChatMessage, ConnectionStatus, DealSet } from "../types/chat"
+import { dlog, truncate } from "../util/debug"
 
 // The same host, agent and instance name tests/chat.ts connects to: one shared
 // agent, no per-user identity. `AGENT_HOST` is how a deployed URL gets baked in.
@@ -134,6 +135,7 @@ export default function useDealScout(): DealScoutChat {
   const failTurn = useCallback(
     (reason: string) => {
       const turn = endTurn()
+      dlog("turn", "fail:", reason, turn ? `(turn ${turn.requestId.slice(0, 8)})` : "(no turn in flight)")
       if (!turn) return
       patch(turn.messageId, (message) => ({
         ...message,
@@ -151,8 +153,10 @@ export default function useDealScout(): DealScoutChat {
       try {
         part = JSON.parse(body)
       } catch {
+        dlog("part", "unparseable body:", truncate(body, 200))
         return
       }
+      dlog("part", part.type ?? "(no type)", truncate(part, 300))
       switch (part.type) {
         case "tool-input-available":
           toolNames.current.set(part.toolCallId, part.toolName)
@@ -164,8 +168,13 @@ export default function useDealScout(): DealScoutChat {
         case "tool-output-available": {
           // Only search_deals results render as cards; get_game_details and the
           // schedule tools have no card shape and stay in the agent's prose.
-          if (toolNames.current.get(part.toolCallId) !== "search_deals") break
+          const toolName = toolNames.current.get(part.toolCallId)
+          if (toolName !== "search_deals") {
+            dlog("part", `tool output ignored (tool: ${toolName ?? "unknown"})`)
+            break
+          }
           const deals = extractDeals(part.output)
+          dlog("part", `search_deals output → ${deals.length} renderable deals`)
           if (deals.length === 0) break
           const dealSet: DealSet = { toolCallId: part.toolCallId, deals }
           patch(messageId, (message) => ({
@@ -187,25 +196,47 @@ export default function useDealScout(): DealScoutChat {
 
   const handleFrame = useCallback(
     (raw: unknown) => {
-      if (typeof raw !== "string") return
+      if (typeof raw !== "string") {
+        dlog("ws", "non-string frame:", typeof raw)
+        return
+      }
       let frame: Record<string, any>
       try {
         frame = JSON.parse(raw)
       } catch {
+        dlog("ws", "unparseable frame:", truncate(raw, 200))
         return
       }
-      if (frame?.type !== CHAT_RESPONSE) return
+      if (frame?.type !== CHAT_RESPONSE) {
+        // Not ours, but worth seeing: cf_agent_state, mcp updates, the
+        // scheduled-task broadcast. If ONLY these arrive, the request never ran.
+        dlog("ws", "other frame:", frame?.type ?? "(no type)", truncate(frame, 200))
+        return
+      }
 
       const turn = turnRef.current
       // Frames for a turn we are not tracking (another client's, or one from
       // before a reconnect) have nowhere to go.
-      if (!turn || frame.id !== turn.requestId) return
+      if (!turn || frame.id !== turn.requestId) {
+        dlog(
+          "ws",
+          "dropped chat frame:",
+          turn == null
+            ? "no turn in flight"
+            : `id ${String(frame.id).slice(0, 8)} != turn ${turn.requestId.slice(0, 8)}`
+        )
+        return
+      }
+      dlog("ws", `chat frame turn=${turn.requestId.slice(0, 8)} done=${!!frame.done} error=${!!frame.error}`)
 
       if (frame.error) {
         failTurn(typeof frame.body === "string" ? frame.body : "the agent reported an error")
         return
       }
-      if (typeof frame.body === "string") applyPart(turn.messageId, frame.body)
+      // The terminal frame carries an empty body, which is not a stream part.
+      if (typeof frame.body === "string" && frame.body.length > 0) {
+        applyPart(turn.messageId, frame.body)
+      }
       if (frame.done) {
         endTurn()
         patch(turn.messageId, (message) => {
@@ -217,6 +248,7 @@ export default function useDealScout(): DealScoutChat {
           // comes back empty while "well-reviewed deals" works — and rendering
           // it as a blank reply just looks like the TUI broke. Marked failed so
           // it is also kept out of the history the next turn sends.
+          dlog("turn", "finished EMPTY — no text and no tool result")
           return {
             ...message,
             pending: false,
@@ -231,9 +263,11 @@ export default function useDealScout(): DealScoutChat {
 
   useEffect(() => {
     let client: AgentClient
+    dlog("ws", `connecting host=${AGENT_HOST} agent=${AGENT} name=${AGENT}`)
     try {
       client = new AgentClient({ host: AGENT_HOST, agent: AGENT, name: AGENT })
     } catch (error) {
+      dlog("ws", "constructor threw:", error instanceof Error ? error.message : String(error))
       setStatus("error")
       setStatusDetail(error instanceof Error ? error.message : String(error))
       return
@@ -241,6 +275,7 @@ export default function useDealScout(): DealScoutChat {
     clientRef.current = client
 
     const onOpen = () => {
+      dlog("ws", "open")
       setStatus("connected")
       setStatusDetail(null)
       // Once per session, not per reconnect: a drop mid-conversation must not
@@ -248,6 +283,7 @@ export default function useDealScout(): DealScoutChat {
       if (!clearedHistory.current) {
         clearedHistory.current = true
         try {
+          dlog("ws", "sending history clear")
           client.send(JSON.stringify({ type: CHAT_CLEAR }))
         } catch {
           // A clear that does not land is not worth failing the connection over.
@@ -258,11 +294,13 @@ export default function useDealScout(): DealScoutChat {
     // TUI keeps rendering either way.
     const onClose = (event: Event) => {
       const close = event as CloseEvent
+      dlog("ws", `close code=${close.code ?? "?"} reason=${close.reason || "(none)"}`)
       setStatus("reconnecting")
       setStatusDetail(close.reason || `socket closed (${close.code ?? "?"})`)
       failTurn("the connection dropped before the agent replied")
     }
-    const onError = () => {
+    const onError = (event: Event) => {
+      dlog("ws", "error event:", truncate((event as ErrorEvent).message ?? event.type, 200))
       setStatus("error")
       setStatusDetail(`cannot reach the agent at ${AGENT_HOST}`)
       failTurn("the connection failed before the agent replied")
@@ -275,6 +313,7 @@ export default function useDealScout(): DealScoutChat {
     client.addEventListener("message", onMessage)
 
     return () => {
+      dlog("ws", "tearing down the client")
       client.removeEventListener("open", onOpen)
       client.removeEventListener("close", onClose)
       client.removeEventListener("error", onError)
@@ -291,10 +330,16 @@ export default function useDealScout(): DealScoutChat {
   const send = useCallback(
     (raw: string) => {
       const text = raw.trim()
+      dlog("send", `submit ${JSON.stringify(raw)} (trimmed ${text.length} chars)`)
       if (text.length === 0) return
 
       const client = clientRef.current
       if (client == null || client.readyState !== AgentClient.OPEN) {
+        dlog(
+          "send",
+          "refused — socket not open:",
+          client == null ? "no client" : `readyState=${client.readyState}`
+        )
         mutate((prev) => [
           ...prev,
           localMessage("Not connected to the agent yet — press ctrl+r to retry.")
@@ -302,6 +347,7 @@ export default function useDealScout(): DealScoutChat {
         return
       }
       if (turnRef.current != null) {
+        dlog("send", `refused — turn ${turnRef.current.requestId.slice(0, 8)} still in flight`)
         mutate((prev) => [...prev, localMessage("Still waiting on the last reply…")])
         return
       }
@@ -347,6 +393,7 @@ export default function useDealScout(): DealScoutChat {
         }))
 
       try {
+        dlog("send", `request ${requestId.slice(0, 8)} with ${wire.length} history message(s)`)
         client.send(
           JSON.stringify({
             type: CHAT_REQUEST,
@@ -355,6 +402,7 @@ export default function useDealScout(): DealScoutChat {
           })
         )
       } catch (error) {
+        dlog("send", "send threw:", error instanceof Error ? error.message : String(error))
         failTurn(error instanceof Error ? error.message : "could not send the message")
       }
     },
@@ -362,6 +410,7 @@ export default function useDealScout(): DealScoutChat {
   )
 
   const retry = useCallback(() => {
+    dlog("ws", "manual reconnect (ctrl+r)")
     setStatus("connecting")
     setStatusDetail(null)
     clientRef.current?.reconnect()

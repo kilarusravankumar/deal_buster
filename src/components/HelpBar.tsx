@@ -27,6 +27,8 @@ export function HelpBar({ focus }: HelpBarProps) {
           <span fg="#9CA3AF">{" Grid"}</span>
           <span fg="#6B7280">{"   ctrl+r"}</span>
           <span fg="#9CA3AF">{" Reconnect"}</span>
+          <span fg="#6B7280">{"   ctrl+d"}</span>
+          <span fg="#9CA3AF">{" Console"}</span>
         </text>
       ) : (
         <text>
@@ -42,6 +44,8 @@ export function HelpBar({ focus }: HelpBarProps) {
           <span fg="#9CA3AF">{" Chat"}</span>
           <span fg="#6B7280">{"   /"}</span>
           <span fg="#9CA3AF">{" Search"}</span>
+          <span fg="#6B7280">{"   d"}</span>
+          <span fg="#9CA3AF">{" Console"}</span>
         </text>
       )}
     </box>

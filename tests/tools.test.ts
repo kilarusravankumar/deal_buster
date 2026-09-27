@@ -61,7 +61,7 @@ test("get_game_details returns the verified genres on a match", async () => {
 });
 
 test("search_deals falls back to the stored price ceiling", async () => {
-  const tool = searchDealsTool({ defaultMaxPrice: 10 });
+  const tool = searchDealsTool({ recordShownDeals: () => {}, defaultMaxPrice: 10 });
   const result = await run(tool, { limit: 5 });
   expect(result.error).toBeUndefined();
   const deals = result.deals as { salePrice: number }[];
@@ -72,7 +72,7 @@ test("search_deals falls back to the stored price ceiling", async () => {
 test("search_deals explains an unindexed steamAppID instead of implying no deal", async () => {
   // 292030 is Steam's real appID for The Witcher 3; CheapShark indexes the deal
   // under its own 124923, so /deals?steamAppID=292030 legitimately returns none.
-  const tool = searchDealsTool({ defaultMaxPrice: null });
+  const tool = searchDealsTool({ recordShownDeals: () => {}, defaultMaxPrice: null });
   const result = await run(tool, { steamAppID: "292030" });
   expect(result.count).toBe(0);
   expect(String(result.note)).toContain("CheapShark indexes its own appID");

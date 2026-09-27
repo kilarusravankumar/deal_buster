@@ -16,11 +16,18 @@ import { getSteamGameDetails } from "../src/api/steam";
 import {
   GAME_TAGS_VERSION,
   initialDealScoutState,
+  migrateDealScoutState,
   type CachedGameTags,
   type DealScoutState,
-  type LoadGameTags
+  type LoadGameTags,
+  type ShownDeal,
+  type Watch,
+  type WatchStore
 } from "./state";
+import { addWatchTool } from "./tools/addWatch";
 import { getGameDetailsTool } from "./tools/getGameDetails";
+import { listWatchesTool } from "./tools/listWatches";
+import { removeWatchTool } from "./tools/removeWatch";
 import { searchDealsTool } from "./tools/searchDeals";
 
 
@@ -37,6 +44,7 @@ export class DealScout extends AIChatAgent<Env, DealScoutState> {
   waitForMcpConnections = true;
 
   onStart() {
+    this.migrateState();
     this.dropStaleGameTags();
 
     // Configure OAuth popup behavior for MCP servers that require authentication
@@ -77,6 +85,39 @@ export class DealScout extends AIChatAgent<Env, DealScoutState> {
   async removeServer(serverId: string) {
     await this.removeMcpServer(serverId);
   }
+
+  /**
+   * Bring a state blob written by an older build up to the current shape.
+   *
+   * Runs before anything else reads state: `initialState` is only applied to a
+   * brand-new instance, so without this an existing agent would be missing
+   * `lastShownDeals` entirely and would still be carrying `threshold` where
+   * watches now hold `targetPrice`.
+   */
+  private migrateState() {
+    const migrated = migrateDealScoutState(this.state);
+    if (migrated == null) return;
+    console.log("[DealScout] migrated state to the current shape");
+    this.setState(migrated);
+  }
+
+  /**
+   * The watch tools' view of state. Reads go through `this.state` on every call
+   * rather than being captured once, because a multi-step turn can add two
+   * watches and the second call has to see the first one's write.
+   */
+  private watchStore: WatchStore = {
+    watches: () => this.state.watches ?? [],
+    saveWatches: (next: Watch[]) => {
+      this.setState({ ...this.state, watches: next });
+    },
+    lastShownDeals: () => this.state.lastShownDeals ?? []
+  };
+
+  /** Snapshot the deals just shown, so the next turn can resolve "the second one". */
+  private recordShownDeals = (deals: ShownDeal[]) => {
+    this.setState({ ...this.state, lastShownDeals: deals });
+  };
 
   /**
    * Drop cached tags written under an older {@link GAME_TAGS_VERSION}. The
@@ -204,7 +245,33 @@ request fails outright.
 
 When you report deals, keep it short: title, sale price, original price and the
 discount, one per line. The terminal renders the structured results as game
-cards, so do not repeat thumbnail URLs or IDs in your prose.
+cards, so do not repeat thumbnail URLs or IDs in your prose. Number them, so the
+user can refer back to one by position.
+
+WATCHING GAMES:
+The user can ask to be alerted when a game gets cheaper. Three tools cover this,
+and between them they are the ONLY source of truth about what is watched — the
+conversation history is pruned between turns, so anything you "remember" about
+the watchlist or about deals you listed earlier is unreliable.
+
+- add_watch puts ONE game on the list. The user usually refers to it by position
+  in the deals you just showed — "watch the second one", "that one", "the first
+  two" — so pass 'position' (1-based, counting the deals you last listed). Pass
+  'title' only when they named a game you have not just shown.
+  If they did NOT name a price, OMIT targetPrice: it then defaults to the game's
+  current sale price, which means "alert me if it drops any further". Only pass
+  targetPrice when they said a number ("tell me when it hits $10" → 10).
+  Watching a game that is already watched updates its target price.
+  To watch more than one game, call add_watch once per game, one call per step —
+  never two in the same message.
+- list_watches answers "what am I watching?". Always call it rather than
+  answering from the conversation. Its numbering is what remove_watch counts.
+- remove_watch takes one game off. Its 'position' counts the WATCHLIST from
+  list_watches, NOT the deals search. If the user says "remove the second one"
+  and you are not certain what the watchlist looks like, call list_watches first.
+
+Watches survive restarts and cleared chat history, so it is safe to tell the user
+a game is being watched once add_watch returns added: true.
 
 All prices are USD and every deal is on Steam.
 
@@ -242,7 +309,14 @@ If the user asks to schedule a task, use the schedule tool to schedule the task.
           // MCP tools from connected servers
           ...mcpTools,
 
-          search_deals: searchDealsTool({ defaultMaxPrice: prefs.maxPrice }),
+          search_deals: searchDealsTool({
+            defaultMaxPrice: prefs.maxPrice,
+            recordShownDeals: this.recordShownDeals
+          }),
+
+          add_watch: addWatchTool({ store: this.watchStore }),
+          list_watches: listWatchesTool({ store: this.watchStore }),
+          remove_watch: removeWatchTool({ store: this.watchStore }),
 
           get_game_details: getGameDetailsTool({
             // Bound to the agent: the cache it reads and writes is agent state.
