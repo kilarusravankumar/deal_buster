@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import getDeals from "../getDeals";
-import getGames from "../getGames";
+import { getDeals, getGames } from "../api/cheapshark";
 import type { Game } from "../types/game";
 import type { SearchGame } from "../types/searchGame";
 import type { DealFilters } from "../types/params";
@@ -44,7 +43,8 @@ export default function useGames(filters: DealFilters, search: string = "") {
         if (cancelled) return
         setResults(data)
       } catch (e) {
-        if (cancelled) return
+        // An aborted request is the cleanup path, not a failure to report.
+        if (cancelled || (e instanceof Error && e.name === "AbortError")) return
         setResults([])
         setSearchErr(e instanceof Error ? e.message : `no results for "${title}".`)
       } finally {
