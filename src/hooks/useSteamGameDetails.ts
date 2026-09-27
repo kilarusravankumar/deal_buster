@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { GameDetails } from "../types/steamGame";
-import getGameDetails from "../getSteamGameDetails";
+import { getSteamGameDetails } from "../api/steam";
 
 export default function useSteamGameDetails(steamAppID: string) {
   const [gameDetails, setGameDetails] = useState<GameDetails | null>(null)
@@ -18,7 +18,7 @@ export default function useSteamGameDetails(steamAppID: string) {
 
     async function getDetails(steamAppID: string) {
       try {
-        let _details = await getGameDetails(steamAppID)
+        let _details = await getSteamGameDetails(steamAppID)
         if (!cancelled) {
           console.log(_details)
           setGameDetails(_details)

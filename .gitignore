@@ -21,6 +21,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 .env.test.local
 .env.production.local
 .env.local
+.dev.vars
 
 # caches
 .eslintcache
@@ -32,3 +33,11 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 # Finder (MacOS) folder config
 .DS_Store
+
+# Cloudflare (wrangler dev state, local secrets)
+.wrangler
+.dev.vars
+
+# compiled TUI binary (bun build --compile)
+deal-buster
+deal-buster-*

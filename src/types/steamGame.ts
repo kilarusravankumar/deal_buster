@@ -20,9 +20,22 @@ export interface SteamAppData {
     linux: boolean;
   };
   screenshots?: SteamScreenshot[];
+  // Genre ids come back as strings ("1"), category ids as numbers (2).
+  genres?: SteamGenre[];
+  categories?: SteamCategory[];
   recommendations?: {
     total: number;
   };
+}
+
+export interface SteamGenre {
+  id: string;
+  description: string;
+}
+
+export interface SteamCategory {
+  id: number;
+  description: string;
 }
 
 export interface SteamScreenshot {
@@ -44,5 +57,9 @@ export interface GameDetails {
     linux: boolean;
   };
   screenshots: string[]; // just the thumbnail URLs, or full URLs — your call
+  // Descriptions only ("Action", "Indie", "Single-player"): these are the tags
+  // the agent reasons over for similarity, so the numeric ids are dropped.
+  genres: string[];
+  categories: string[];
   totalRecommendations: number;
 }

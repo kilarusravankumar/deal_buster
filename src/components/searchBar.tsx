@@ -1,5 +1,6 @@
 import { useKeyboard } from "@opentui/react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { setTextCapture } from "../util/keyCapture"
 
 interface searchBarProps {
   searchString: string,
@@ -13,6 +14,13 @@ export default function SearchBar({ searchString, onSearchString, showToggle }: 
   const handleSubmit = () => {
     onSearchString(search)
   }
+
+  // Bare-letter bindings elsewhere (the debug console's "d") see every keypress
+  // regardless of focus, so the bar has to claim the keyboard while it is open.
+  useEffect(() => {
+    setTextCapture(true)
+    return () => setTextCapture(false)
+  }, [])
 
   // "q" would be swallowed out of any title being typed, so escape is the
   // only way out of the bar.

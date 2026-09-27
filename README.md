@@ -42,6 +42,20 @@ Or via the package script:
 bun start
 ```
 
+The chat pane talks to the deployed Deal Scout agent, so this needs no
+configuration. To point it somewhere else — a local `wrangler dev`, say:
+
+```sh
+bun run index.tsx --local                  # ws://localhost:8787
+bun run index.tsx --agent-url ws://host:port/agents/deal-scout/deal-scout
+DEAL_BUSTER_AGENT_URL=ws://localhost:8787/agents/deal-scout/deal-scout bun start
+```
+
+The chat pane's title names the endpoint whenever it is not the deployed one, so
+a local session is never mistaken for a production one. Press `d` (or `ctrl+d`
+while typing) for the debug console, and set `DEALSCOUT_DEBUG_LOG=/tmp/ds.log` to
+trace the agent connection to a file.
+
 ### Develop
 
 Hot reload on file changes:
@@ -57,11 +71,16 @@ bun dev
 Compile to a standalone executable:
 
 ```sh
-bun build --compile index.tsx --outfile deal-buster
+bun run build:tui       # bun build --compile index.tsx --outfile deal-buster
 ./deal-buster
 ```
 
-No API keys or environment variables are required — deals and game details come from public endpoints.
+The deployed agent URL is a literal in `src/util/agentTarget.ts`, so it is baked
+into the executable: a downloaded binary connects with zero configuration, and
+still accepts `--local` / `--agent-url` / `DEAL_BUSTER_AGENT_URL`.
+
+No API keys are required — deals and game details come from public endpoints, and
+the agent's own secrets live on the Worker, never in the client.
 
 ## Status
 

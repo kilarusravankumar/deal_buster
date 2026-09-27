@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="AI chat agent built with Cloudflare Agents"
+    />
+    <title>Deal Buster — Deal Scout</title>
+    <link rel="icon" href="/favicon.ico" />
+    <script>
+      (() => {
+        // Dark by default: this is a terminal-adjacent tool, usually opened in a
+        // dark editor. Set here rather than in React so the first paint is
+        // already dark — flipping it after hydration is a white flash.
+        const mode = localStorage.getItem("theme") || "dark";
+        document.documentElement.setAttribute("data-mode", mode);
+        document.documentElement.style.colorScheme = mode;
+      })();
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/worker/web/client.tsx"></script>
+  </body>
+</html>

@@ -1,4 +1,8 @@
 {
+  // TUI project: Bun + OpenTUI. The Worker/web side is compiled by
+  // tsconfig.worker.json instead — keeping them apart is what stops workerd's
+  // generated runtime types (worker/env.d.ts) from colliding with Bun's
+  // fetch/Request/Response/WebSocket/Headers globals.
   "compilerOptions": {
     // Environment setup & latest features
     "lib": [
@@ -29,5 +33,11 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false,
     "noPropertyAccessFromIndexSignature": false
-  }
+  },
+  "include": [
+    "index.tsx",
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "tests/**/*.ts"
+  ]
 }
