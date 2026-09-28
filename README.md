@@ -1,87 +1,128 @@
 # Deal Buster
 
-A terminal-based Steam deals browser. Find discounted games, sort by what matters to you, and dig into game details — all without leaving your terminal.
+Hunt Steam deals from your terminal.
 
-## Why
+Deal Buster is a fast, keyboard-driven terminal app for browsing Steam sales — no bloated storefront, no mouse, no noise. Games on sale show up as a grid of cards you can sort and dig into. And it's more than a browser now: built in is **Deal Scout**, an AI agent you can just talk to. Ask what's on sale, tell it to watch a game, and it'll email you when the price drops.
 
-Steam sales are great, but browsing deals means opening a browser, loading a bloated storefront, and scrolling through pages of noise. Deal Buster puts that workflow where it belongs for terminal-native people: right in the terminal, keyboard-driven, fast, and distraction-free.
+## Install
 
-## What it does
-
-**Browse deals at a glance.** Games on sale are displayed in a grid of cards showing the title, sale price, original price, savings percentage, release date, and community rating — everything you need to decide if a deal is worth a closer look.
-
-**Sort the way you want.** A bottom bar (htop/btop-style) lets you cycle through sort options with a keypress: by price, savings, deal rating, Metacritic score, title, reviews, release date, and more. The sort happens server-side so results are fast regardless of how many deals are out there.
-
-**Dive into details.** Select any game card to open a detail view with the header image, full description, developer and publisher info, platform support, and total recommendations — pulled directly from the Steam store API.
-
-**Paginated, not overwhelming.** Deals load a page at a time. Scroll through what's there, load more when you want it. No waiting for thousands of results to arrive before you can start browsing.
-
-## What it looks like
-
-The main screen is a scrollable grid of game cards with cover art, pricing, and ratings. The bottom bar shows the current sort and available controls. Selecting a card opens a side-by-side detail view: game image on the left, full info on the right with the description rendered as formatted text.
-
-All keyboard-driven. Arrow keys navigate the grid, Enter opens details, Escape goes back, Tab cycles sort options.
-
-## Getting started
-
-Deal Buster runs on [Bun](https://bun.com). Install it first, then clone the repo and install dependencies:
+Deal Buster runs on [Bun](https://bun.com). Install Bun, then:
 
 ```sh
 bun install
+bun start                    # or: bun run index.tsx
 ```
 
-### Run
+That's it — the app ships pointed at the hosted Deal Scout agent, so the chat works out of the box with no configuration or API keys.
+
+Prefer a standalone binary? The agent URL is baked in, so a compiled build just runs:
 
 ```sh
-bun run index.tsx
-```
-
-Or via the package script:
-
-```sh
-bun start
-```
-
-The chat pane talks to the deployed Deal Scout agent, so this needs no
-configuration. To point it somewhere else — a local `wrangler dev`, say:
-
-```sh
-bun run index.tsx --local                  # ws://localhost:8787
-bun run index.tsx --agent-url ws://host:port/agents/deal-scout/deal-scout
-DEAL_BUSTER_AGENT_URL=ws://localhost:8787/agents/deal-scout/deal-scout bun start
-```
-
-The chat pane's title names the endpoint whenever it is not the deployed one, so
-a local session is never mistaken for a production one. Press `d` (or `ctrl+d`
-while typing) for the debug console, and set `DEALSCOUT_DEBUG_LOG=/tmp/ds.log` to
-trace the agent connection to a file.
-
-### Develop
-
-Hot reload on file changes:
-
-```sh
-bun dev
-```
-
-(equivalent to `bun --hot index.tsx`)
-
-### Build
-
-Compile to a standalone executable:
-
-```sh
-bun run build:tui       # bun build --compile index.tsx --outfile deal-buster
+bun run build:tui
 ./deal-buster
 ```
 
-The deployed agent URL is a literal in `src/util/agentTarget.ts`, so it is baked
-into the executable: a downloaded binary connects with zero configuration, and
-still accepts `--local` / `--agent-url` / `DEAL_BUSTER_AGENT_URL`.
+**Don't want to install anything?** Deal Scout is also hosted as a web chat — same agent, same watchlist, nothing to set up:
 
-No API keys are required — deals and game details come from public endpoints, and
-the agent's own secrets live on the Worker, never in the client.
+> **[▶ Open Deal Scout in your browser](https://deal-buster-agent.kilarusravankumar.workers.dev/)**
 
-## Status
+Use the terminal app for the full deal-browsing experience; use the link when you just want to ask the agent something quickly.
 
-Under active development. Core browsing, sorting, and detail views are functional. Planned additions include filtering (by price range, rating, store), search, and wishlist tracking.
+## What it does
+
+**Browse deals in the terminal.** A scrollable grid of game cards — title, sale price, original price, savings, rating, release date. Sort by price, savings, deal rating, Metacritic, reviews, and more from a bottom bar; sorting happens server-side so it stays fast. Enter opens a detail view with the header image, description, developer, and platform info from Steam.
+
+**Or just ask.** "Best deals under $10." "Any deals on Hades?" "Well-reviewed RPGs under $20." Deal Scout turns plain language into the right search and shows you real, current deals — as cards in the terminal, inline in the web chat.
+
+**Straight answers about genre.** Steam's deal feed doesn't carry genre, so most tools guess. Deal Scout doesn't — it pulls the real genres from Steam and only calls a game a roguelike if Steam agrees. If it hasn't checked, it says so instead of making it up.
+
+**Watch games and get alerted.** "Watch The Witcher 3 and tell me when it's under $30." Deal Scout remembers your watchlist, checks prices on a schedule, and emails you when something drops — with a short note on *why* it's a good deal. The alert lands in your chat too if you're connected.
+
+## How it works
+
+Deal Scout runs entirely on Cloudflare's edge — no servers to manage, and it keeps working whether or not anyone's connected. The terminal app and the web chat both talk to the same agent over a WebSocket, so your watchlist and history are the same wherever you reach it from.
+
+```
+┌─────────────┐        ┌─────────────┐
+│  Terminal   │        │  Web chat   │
+│  (Bun/TUI)  │        │  (browser)  │
+└──────┬──────┘        └──────┬──────┘
+       │      WebSocket       │
+       └──────────┬───────────┘
+                  ▼
+        ┌───────────────────┐
+        │    Deal Scout     │   Durable Object — durable per-session
+        │                   │   identity, state, and scheduling
+        │  ├ Llama 3.3      │   Workers AI (tool-calling)
+        │  ├ tools ─────────┼─► CheapShark (deals) · Steam (genres)
+        │  ├ memory         │   watchlist · preferences · genre cache
+        │  └ daily check ───┼─► Price-Check Workflow
+        └───────────────────┘         ├ fetch current prices
+                                       ├ compare to your targets
+                                       ├ Llama writes the alert
+                                       └ email + in-chat ping
+```
+
+- **Workers AI (Llama 3.3, `@cf/meta/llama-3.3-70b-instruct-fp8-fast`)** — understands requests and calls tools. It never touches an API or database directly; it asks, the agent executes.
+- **Durable Object** — the agent itself: one durable object holding the conversation, watchlist, preferences, and a cache of game genres, surviving restarts.
+- **Cloudflare Workflow** — the price checker. Each step (fetch, compare, write, notify) retries on its own, so a flaky upstream never loses an alert.
+- **Scheduling** — a daily alarm kicks off the workflow; a dev endpoint triggers it on demand.
+- **Static assets** — the web chat, served from the same Worker.
+
+Deals come from [CheapShark](https://apidocs.cheapshark.com/), genre and detail data from the Steam store API. Prices are Steam-store only, on purpose.
+
+## Pointing the terminal app elsewhere
+
+The TUI ships aimed at the hosted agent. To point it at a local agent instead:
+
+```sh
+bun run index.tsx --local    # ws://localhost:8787
+DEAL_BUSTER_AGENT_URL=ws://host:port/agents/deal-scout/deal-scout bun start
+```
+
+## Run the agent yourself
+
+The agent is a Cloudflare Worker. With [Wrangler](https://developers.cloudflare.com/workers/wrangler/) installed and `wrangler login` done:
+
+```sh
+bun install
+bun run agent:dev            # local, on http://localhost:8787
+bun run agent:deploy         # to your own *.workers.dev
+```
+
+Price-drop emails go through [Resend](https://resend.com). Set the secrets (and a `.dev.vars` file with the same keys for local runs):
+
+```sh
+wrangler secret put RESEND_API_KEY     # your Resend key
+wrangler secret put NOTIFY_EMAIL       # where alerts go
+wrangler secret put DEV_TRIGGER_TOKEN  # guards the manual price-check route
+```
+
+No API keys are needed for the deal data itself — CheapShark and the Steam store are public. The agent's secrets live on the Worker, never in the clients.
+
+## Under the hood
+
+- **Frontend:** OpenTUI + React on [Bun](https://bun.com) (terminal), a lightweight web chat (browser)
+- **Agent:** Cloudflare Workers, Durable Objects, Workflows, Workers AI, Wrangler
+- **Data:** CheapShark (deals), Steam store API (genres, details)
+- **Email:** Resend
+
+State is stored as JSON on the Durable Object — watchlist, preferences, and a genre cache — so there's no separate database to run.
+
+## Known limits
+
+- **Genres are as precise as Steam's are.** Steam's genre field is coarse (Action, RPG, Indie…). Community tags like *roguelike* or *soulslike* aren't in it, so Deal Scout can confirm "Action/RPG" but not "roguelike" from Steam alone.
+- **Alerts favor never-duplicate over never-lose.** If an email fails after the price has been marked as notified, that one alert is dropped rather than risk sending it twice.
+- **A watched game re-alerts only on a new low**, not every time it sits under your target — so you're not pinged daily about the same price.
+
+## Roadmap
+
+- Similar-game recommendations that learn from what you like
+- Per-user accounts (each person's own watchlist and alerts)
+- Richer terminal detail views fed from the agent
+
+---
+
+Built largely through AI-assisted development; the full prompt history lives in [PROMPTS.md](./PROMPTS.md).
+
+MIT licensed.
