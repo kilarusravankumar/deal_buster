@@ -15,6 +15,8 @@ bun start                    # or: bun run index.tsx
 
 That's it — the app ships pointed at the hosted Deal Scout agent, so the chat works out of the box with no configuration or API keys.
 
+Use a graphics-capable terminal for the full experience. Deal Buster renders real game cover art in the deal cards and detail views, which needs a terminal that supports the Kitty graphics protocol — Ghostty (recommended), Kitty, or WezTerm. It still runs fine in other terminals; you just won't see the artwork.
+
 Prefer a standalone binary? The agent URL is baked in, so a compiled build just runs:
 
 ```sh
