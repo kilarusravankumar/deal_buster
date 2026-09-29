@@ -100,15 +100,13 @@ export function searchDealsTool({
         .enum(SORT_OPTIONS)
         .optional()
         .describe(
-          `Result ordering: Price for 'cheapest', Savings for 'biggest discount', Recent for 'newest deals', Metacritic or Reviews for quality. Defaults to DealRating. Well reviewed game then pass .
-              DealRating, Title, Savings, Price, Metacritic, Reviews, ReviewCount, Release, Store, Recent`
-
+          "Result ordering: 'Price' for cheapest, 'Savings' for biggest discount or steals, 'Release' for newly released games, 'Recent' for newest price drops, 'Metacritic' or 'Reviews' for quality. Defaults to 'DealRating'."
         ),
       sortDescending: z
         .boolean()
         .optional()
         .describe(
-          "Reverse the ordering to highest-first, e.g. 'most expensive' or 'best rated first' → true. or parctically steals then sort by savings or highest savings then sortBy savings"
+          "Invert CheapShark's default sort direction. CheapShark already defaults to cheapest for Price, highest discount for Savings, and newest first for Release. Only set sortDescending=true if the user explicitly wants the reverse (e.g., 'most expensive' or 'oldest games')."
         ),
       limit: z.coerce
         .number()
@@ -119,6 +117,7 @@ export function searchDealsTool({
     execute: async (filters) => {
       // Fall back to the stored ceiling when the user did not name one.
       const ceiling = filters.maxPrice ?? defaultMaxPrice ?? undefined;
+      // console.log("filters LLM used are", filters)
       try {
         const deals = await searchDeals({ ...filters, maxPrice: ceiling });
         // `/deals?steamAppID=` matches CheapShark's own steamAppID, which is
