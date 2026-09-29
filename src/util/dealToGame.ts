@@ -8,8 +8,8 @@ import type { Game } from "../types/game";
  *
  * Nothing is invented: fields the tool does not send are left empty or zero, and
  * the card is responsible for rendering those as "unknown" rather than as a
- * plausible-looking wrong value. In particular `releaseDate` is 0 — the tool
- * does not carry it — which ConvertToDate renders as a dash, not as 1970.
+ * plausible-looking wrong value. Fields carried on Deal (like releaseDate) are
+ * preserved, falling back to 0 if absent (which ConvertToDate renders as a dash).
  */
 export function dealToGame(deal: Deal): Game {
   return {
@@ -32,7 +32,7 @@ export function dealToGame(deal: Deal): Game {
     steamRatingCount: "",
     // Already resolved to an id Steam will answer for — see steamAppIDCandidates.
     steamAppID: deal.steamAppID ?? "",
-    releaseDate: 0,
+    releaseDate: Number(deal.releaseDate) || 0,
     lastChange: 0,
     dealRating: "",
     thumb: deal.thumb
