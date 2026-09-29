@@ -6,7 +6,8 @@
   "scripts": {
     "start": "bun run index.tsx",
     "dev": "bun --hot index.tsx",
-    "agent:dev": "wrangler dev",
+    "dev:local": "bun --hot index.tsx --local",
+    "agent:dev": "wrangler dev --port 8787",
     "agent:deploy": "bun run deploy",
     "agent:types": "wrangler types worker/env.d.ts",
     "web:dev": "vite dev",
